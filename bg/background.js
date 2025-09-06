@@ -1,7 +1,7 @@
 // WHY THIS FILE:
 // - MV3 background worker opens your hosted UI and injects data safely.
 
-const STORMAI_URL = "https://branchai-theta.vercel.app/"; // <-- deploy StormAI here (HTTPS)
+const STORMAI_URL = "https://stormeai.vercel.app/"; // <-- deploy StormAI here (HTTPS)
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === 'OPEN_STORMAI') {
