@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>StormAI v1 — Branching Workspace</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./app.css" />
+</head>
+<body>
+  <header>
+    <strong>StormAI v1</strong>
+    <span id="modelStatus" class="pill">loading model…</span>
+    <span class="pill">
+      model:
+      <select id="modelSel">
+        <option value="Llama-3.2-3B-Instruct-q4f32_1-MLC">Llama-3.2-3B (q4)</option>
+        <option value="Qwen2.5-3B-Instruct-q4f32_1-MLC">Qwen2.5-3B (q4)</option>
+      </select>
+    </span>
+    <span id="storageStatus" class="pill muted">storage: local</span>
+    <span class="pill muted">in-browser • no keys</span>
+    <div style="margin-left:auto" class="row">
+      <button class="btn" id="exportBtn">Export JSON</button>
+      <button class="btn" id="importBtn">Import JSON</button>
+      <input type="file" id="fileInput" style="display:none" accept=".json,.enc.json,.stormai.json" />
+    </div>
+  </header>
+
+  <div class="wrap">
+    <section class="pane" id="leftPane">
+      <div class="toolbar">
+        <h3>Projects</h3>
+        <button class="btn" id="newProjectBtn">New</button>
+      </div>
+      <div id="projects"></div>
+      <hr/>
+      <div class="toolbar">
+        <h3>Branches</h3>
+        <button class="btn" id="newBranchBtn">New Branch</button>
+      </div>
+      <div id="branches"></div>
+    </section>
+
+    <section class="pane">
+      <div class="toolbar">
+        <div class="row">
+          <input type="text" id="projectName" placeholder="Project name" />
+          <span id="tokenInfo" class="badge muted">~0 tokens</span>
+        </div>
+        <div class="row">
+          <button class="btn" id="branchHereBtn">Branch from last</button>
+        </div>
+      </div>
+      <div id="transcript"></div>
+    </section>
+
+    <section class="pane">
+      <div class="row" style="justify-content:space-between">
+        <h3>Run</h3>
+        <select id="strategySel">
+          <option value="direct">direct continue</option>
+          <option value="critic">critic → revise</option>
+          <option value="plan">plan → execute</option>
+        </select>
+      </div>
+      <p class="muted">Optional instruction for this branch turn:</p>
+      <textarea id="extra" placeholder="e.g., explore an alternative approach focusing on performance"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="btn" id="runBtn">Run</button>
+        <button class="btn" id="copyBtn">Copy latest</button>
+      </div>
+      <h3>Assistant</h3>
+      <div id="out" class="code"></div>
+    </section>
+  </div>
+
+  <!-- WHY: WebLLM UMD bundle. Inference runs fully in-browser via WebGPU. -->
+  <script src="https://unpkg.com/@mlc-ai/web-llm@0.2.62/dist/webllm.min.js"></script>
+  <!-- App entrypoint (ES modules) -->
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
