@@ -9,6 +9,7 @@
       "scripting"  
     ],
     "host_permissions": [
+      "https://chat.openai.com/*",
       "https://chat.openai.com/*", 
       "https://stormeai.vercel.app/*"       
     ],
@@ -17,7 +18,10 @@
     },
     "content_scripts": [
       {
-        "matches": ["https://chat.openai.com/*"],
+        "matches": [
+          "https://chat.openai.com/*",
+          "https://chatgpt.com/*" 
+          ],
         "js": ["content/content.js"],
         "css": ["content/content.css"],
         "run_at": "document_idle" 
