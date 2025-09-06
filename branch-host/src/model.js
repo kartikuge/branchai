@@ -9,6 +9,22 @@ function setStatus(cb, text, lvl="info"){ cb?.(text, lvl); }
 
 export function getCurrentModel(){ return currentModel; }
 
+async function loadWebLLM(onStatus) {
+  const VER = "0.2.79";
+  const cdns = [
+    `https://esm.run/@mlc-ai/web-llm@${VER}`,
+    `https://esm.sh/@mlc-ai/web-llm@${VER}`,
+    `https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@${VER}/lib/index.js`
+  ];
+  for (const url of cdns) {
+    try {
+      onStatus?.(`loading WebLLM SDK… (${new URL(url).host})`, "warn");
+      return await import(url);
+    } catch (e) {/* try next */}
+  }
+  throw new Error("Failed to load WebLLM SDK from all CDNs");
+}
+
 export async function initModel(modelId, onStatus){
   if (!("gpu" in navigator)) {
     setStatus(onStatus, "WebGPU not available (update Chrome/Edge)", "bad");
@@ -16,10 +32,7 @@ export async function initModel(modelId, onStatus){
   }
 
   // dynamic-import the sdk from esm.run
-  if (!webllm) {
-    setStatus(onStatus, "loading WebLLM SDK…", "warn");
-    webllm = await import(`https://esm.run/@mlc-ai/web-llm@${VER}`);
-  }
+  webllm = await loadWebLLM(onStatus);
 
   currentModel = modelId;
   setStatus(onStatus, "loading model… (first run downloads weights)", "warn");
