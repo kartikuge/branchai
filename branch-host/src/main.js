@@ -1,11 +1,29 @@
-// WHY: single place to wire modules together (bootstrap).
 import { loadInitial, persist, state, currentBranch } from './state.js';
 import { bindStaticControls, renderAll, setModelStatus, updateStorageStatus } from './ui.js';
 import { initModel, switchModel, sysPrompt, run, getCurrentModel } from './model.js';
-import { exportCurrentProject, importFromFile } from './export_import.js';
 import { now } from './utils.js';
 
 const $ = (id) => document.getElementById(id);
+
+// NEW: fetch injected context from multiple places
+function getInjectedContext() {
+  if (Array.isArray(window.__BRANCH_CONTEXT) && window.__BRANCH_CONTEXT.length) {
+    return window.__BRANCH_CONTEXT;
+  }
+  try {
+    const raw = sessionStorage.getItem('stormai_ctx');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  // optional: URL hash ?ctx=<base64>
+  if (location.hash.startsWith('#ctx=')) {
+    try {
+      const b64 = location.hash.slice(5);
+      const json = decodeURIComponent(escape(atob(b64)));
+      return JSON.parse(json);
+    } catch {}
+  }
+  return null;
+}
 
 bindStaticControls({
   onRun: runCurrent,
@@ -16,23 +34,28 @@ bindStaticControls({
   },
   onImport: async (e) => {
     const file = e.target.files?.[0]; if (!file) return;
-    await importFromFile(file); e.target.value='';
+    const mod = await import('./export_import.js'); await mod.importFromFile(file); e.target.value='';
   },
-  onExport: exportCurrentProject,
+  onExport: async () => { const mod = await import('./export_import.js'); mod.exportCurrentProject(); },
   onBranchHere: branchFromLast,
-  onModelChange: async (ev) => {
-    await switchModel(ev.target.value, (txt, lvl)=>setModelStatus(txt,lvl));
-  }
+  onModelChange: async (ev) => { await switchModel(ev.target.value, (t,l)=>setModelStatus(t,l)); }
 });
 
-// Boot
 (async function boot() {
-  const injected = Array.isArray(window.__BRANCH_CONTEXT) ? window.__BRANCH_CONTEXT : null;
-  await loadInitial(injected);
+  await loadInitial(getInjectedContext());
   renderAll();
-  await initModel($('modelSel').value, (txt,lvl)=>setModelStatus(txt,lvl));
-  updateStorageStatus('storage: local'); // local-first v1
+  await initModel(document.getElementById('modelSel').value, (t,l)=>setModelStatus(t,l));
+  updateStorageStatus('storage: local');
 })();
+
+// NEW: if context arrives after boot (background inject), consume it
+window.addEventListener('stormai:ctx-ready', async () => {
+  const ctx = getInjectedContext();
+  if (ctx && ctx.length) {
+    await loadInitial(ctx); // will create a new project/branch focused on this context
+    renderAll();
+  }
+});
 
 function buildMessages(extra, strategy) {
   const b = currentBranch(); if (!b) return [];
@@ -45,33 +68,25 @@ function buildMessages(extra, strategy) {
 }
 
 async function runCurrent() {
-  const b = currentBranch();
-  if (!b) { alert("Select or create a branch first."); return; }
-
-  const extra = $('extra').value;
-  const strategy = $('strategySel').value;
-  $('out').textContent = '';
-
+  const b = currentBranch(); if (!b) return alert('Select or create a branch first.');
+  const extra = $('extra').value; const strategy = document.getElementById('strategySel').value;
+  document.getElementById('out').textContent = '';
   try {
     const output = await run(buildMessages(extra, strategy), {
-      temperature: 0.7,
-      max_tokens: 1024,
-      onToken: (txt) => { $('out').textContent = txt; }
+      temperature: 0.7, max_tokens: 1024,
+      onToken: (txt) => { document.getElementById('out').textContent = txt; }
     });
-
-    if (extra?.trim()) b.messages.push({ role: 'user', content: extra.trim(), ts: now() });
-    b.messages.push({ role: 'assistant', content: $('out').textContent || output, ts: now() });
+    if (extra?.trim()) b.messages.push({ role:'user', content: extra.trim(), ts: now() });
+    b.messages.push({ role:'assistant', content: document.getElementById('out').textContent || output, ts: now() });
     b.model = getCurrentModel(); b.updatedAt = now();
     await persist();
   } catch (e) {
     console.error('[StormAI] run error', e);
-    $('out').textContent = 'error: ' + (e?.message || e);
+    document.getElementById('out').textContent = 'error: ' + (e?.message || e);
   }
 }
 
 async function branchFromLast() {
-  const b = currentBranch(); if (!b || !b.messages.length) return;
-  // Reuse UI’s “branch from here” by simulating click on last index
   const btns = document.querySelectorAll('#transcript .btn[data-idx]');
   if (btns.length) btns[btns.length-1].click();
 }

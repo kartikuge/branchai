@@ -1,60 +1,49 @@
-// WHY THIS FILE:
-// - Runs in the ChatGPT page (isolated world).
-// - Adds “Branch” next to each message.
-// - Scrapes only visible text (privacy-by-design).
-// - No API keys here (least privilege).
+console.log("[StormAI] content script loaded");
 
-const MSG_SELECTOR = 'main div[data-message-author-role], main .group';
-const BTN_CLASS = 'branch-chat-btn';
+const MSG_SELECTOR = 'div[data-message-author-role], article[data-message-author-role], main .group';
 
 function roleOf(el) {
   const r = el.getAttribute('data-message-author-role');
-  if (r) return r; // 'user' | 'assistant' | 'system'
-  return el.querySelector('div.markdown, .prose') ? 'assistant' : 'user';
+  if (r) return r === 'assistant' ? 'assistant' : 'user';
+  // fallback heuristics
+  if (el.className?.toLowerCase().includes('assistant')) return 'assistant';
+  return 'user';
 }
 
 function textOf(el) {
-  const md = el.querySelector('div.markdown, .prose, .message-content');
-  return (md ? md.innerText : el.innerText || '').trim();
+  // Grab visible text; be resilient to nested rich blocks
+  return (el.innerText || el.textContent || "").trim();
 }
 
 function collectMessagesUpTo(targetEl) {
-  const nodes = Array.from(document.querySelectorAll(MSG_SELECTOR));
-  const slice = [];
-  for (const el of nodes) {
-    const content = textOf(el);
-    if (!content) continue;
-    slice.push({
-      role: roleOf(el) === 'assistant' ? 'assistant' : 'user',
-      content,
-      ts: Date.now()
-    });
-    if (el === targetEl) break;
-  }
-  return slice;
+  const all = [...document.querySelectorAll(MSG_SELECTOR)]
+    .filter(n => textOf(n).length); // ignore empties
+  const idx = all.indexOf(targetEl);
+  const upto = idx >= 0 ? all.slice(0, idx + 1) : all;
+  return upto.map(n => ({ role: roleOf(n), content: textOf(n) }));
 }
 
 function injectButtons(root = document) {
   const nodes = root.querySelectorAll(MSG_SELECTOR);
   nodes.forEach((el) => {
-    if (el.querySelector(`.${BTN_CLASS}`)) return;
-    el.classList.add('branch-anchor');
-
+    if (el.querySelector('.branch-chat-btn')) return;
     const btn = document.createElement('button');
-    btn.className = BTN_CLASS;
+    btn.className = 'branch-chat-btn';
     btn.textContent = 'branch';
-    btn.title = 'Branch from here → StormAI';
+    Object.assign(btn.style, {
+      position: 'absolute', right: '8px', top: '8px',
+      padding: '4px 8px', border: '1px solid #ddd',
+      borderRadius: '8px', background: '#fff', cursor: 'pointer', zIndex: 5
+    });
     btn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const transcript = collectMessagesUpTo(el);
       chrome.runtime.sendMessage({ type: 'OPEN_STORMAI', transcript });
     });
-
     el.style.position = 'relative';
     el.appendChild(btn);
   });
 }
 
+new MutationObserver(() => injectButtons()).observe(document.documentElement, { subtree: true, childList: true });
 injectButtons();
-const mo = new MutationObserver(() => injectButtons());
-mo.observe(document.body, { childList: true, subtree: true });
