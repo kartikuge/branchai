@@ -5,88 +5,87 @@ import { now } from './utils.js';
 
 const $ = (id) => document.getElementById(id);
 
-// NEW: fetch injected context from multiple places
 function getInjectedContext() {
   if (Array.isArray(window.__BRANCH_CONTEXT) && window.__BRANCH_CONTEXT.length) {
-    return window.__BRANCH_CONTEXT;
+    return { ctx: window.__BRANCH_CONTEXT, anchor: window.__BRANCH_ANCHOR ?? window.__BRANCH_CONTEXT.length - 1 };
   }
   try {
     const raw = sessionStorage.getItem('stormai_ctx');
-    if (raw) return JSON.parse(raw);
+    const ctx = raw ? JSON.parse(raw) : null;
+    const a = Number(sessionStorage.getItem('stormai_anchor') ?? (ctx ? ctx.length - 1 : 0));
+    if (ctx?.length) return { ctx, anchor: a };
   } catch {}
-  // optional: URL hash ?ctx=<base64>
-  if (location.hash.startsWith('#ctx=')) {
-    try {
-      const b64 = location.hash.slice(5);
-      const json = decodeURIComponent(escape(atob(b64)));
-      return JSON.parse(json);
-    } catch {}
-  }
   return null;
 }
 
 bindStaticControls({
-  onRun: runCurrent,
+  onRun: sendMessage,
   onCopy: async () => {
-    const text = $('out').textContent || ''; if (!text) return;
-    await navigator.clipboard.writeText(text);
-    const btn = $('copyBtn'); const old = btn.textContent; btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent=old, 900);
+    const text = $('out').textContent || '';
+    if (text) await navigator.clipboard.writeText(text);
   },
-  onImport: async (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const mod = await import('./export_import.js'); await mod.importFromFile(file); e.target.value='';
-  },
+  onModelChange: async (ev) => switchModel(ev.target.value, (t,l)=>setModelStatus(t,l)),
+  onImport: async (e) => { const mod = await import('./export_import.js'); await mod.importFromFile(e.target.files?.[0]); e.target.value=''; },
   onExport: async () => { const mod = await import('./export_import.js'); mod.exportCurrentProject(); },
-  onBranchHere: branchFromLast,
-  onModelChange: async (ev) => { await switchModel(ev.target.value, (t,l)=>setModelStatus(t,l)); }
 });
 
 (async function boot() {
-  await loadInitial(getInjectedContext());
+  const inj = getInjectedContext();
+  await loadInitial(inj?.ctx, inj?.anchor);   // <— seed project/branch
   renderAll();
   await initModel(document.getElementById('modelSel').value, (t,l)=>setModelStatus(t,l));
   updateStorageStatus('storage: local');
+
+  // If context arrives a bit late
+  window.addEventListener('stormai:ctx-ready', async () => {
+    const late = getInjectedContext();
+    if (late?.ctx?.length) {
+      await loadInitial(late.ctx, late.anchor);
+      renderAll();
+    }
+  });
+
+  // Enter-to-send
+  const ta = document.getElementById('extra');
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendMessage(); }
+  });
 })();
 
-// NEW: if context arrives after boot (background inject), consume it
-window.addEventListener('stormai:ctx-ready', async () => {
-  const ctx = getInjectedContext();
-  if (ctx && ctx.length) {
-    await loadInitial(ctx); // will create a new project/branch focused on this context
-    renderAll();
-  }
-});
-
-function buildMessages(extra, strategy) {
+function buildMessages(userText, strategy) {
   const b = currentBranch(); if (!b) return [];
-  const lastTurns = b.messages.slice(-8);
+  const sys = sysPrompt(strategy);
   const msgs = [];
-  const sys = sysPrompt(strategy); if (sys) msgs.push({ role:'system', content: sys });
-  lastTurns.forEach(m => msgs.push({ role: m.role==='assistant'?'assistant':'user', content: m.content }));
-  if (extra?.trim()) msgs.push({ role: 'user', content: extra.trim() });
+  if (sys) msgs.push({ role: 'system', content: sys });
+  b.messages.slice(-12).forEach(m => msgs.push({ role: m.role, content: m.content }));
+  if (userText?.trim()) msgs.push({ role: 'user', content: userText.trim() });
   return msgs;
 }
 
-async function runCurrent() {
-  const b = currentBranch(); if (!b) return alert('Select or create a branch first.');
-  const extra = $('extra').value; const strategy = document.getElementById('strategySel').value;
-  document.getElementById('out').textContent = '';
+async function sendMessage() {
+  const b = currentBranch(); if (!b) return alert('Create/select a branch first.');
+  const userText = $('extra').value;
+  $('extra').value = '';
+  $('out').textContent = '';
+
+  if (userText?.trim()) {
+    b.messages.push({ role: 'user', content: userText.trim(), ts: now() });
+    await persist();
+    renderAll();
+  }
+
   try {
-    const output = await run(buildMessages(extra, strategy), {
+    const output = await run(buildMessages(null, document.getElementById('strategySel').value), {
       temperature: 0.7, max_tokens: 1024,
-      onToken: (txt) => { document.getElementById('out').textContent = txt; }
+      onToken: (txt) => { $('out').textContent = txt; }
     });
-    if (extra?.trim()) b.messages.push({ role:'user', content: extra.trim(), ts: now() });
-    b.messages.push({ role:'assistant', content: document.getElementById('out').textContent || output, ts: now() });
+    const assistantText = $('out').textContent || output || '(no content)';
+    b.messages.push({ role: 'assistant', content: assistantText, ts: now() });
     b.model = getCurrentModel(); b.updatedAt = now();
     await persist();
+    renderAll();
   } catch (e) {
     console.error('[StormAI] run error', e);
-    document.getElementById('out').textContent = 'error: ' + (e?.message || e);
+    $('out').textContent = 'error: ' + (e?.message || e);
   }
-}
-
-async function branchFromLast() {
-  const btns = document.querySelectorAll('#transcript .btn[data-idx]');
-  if (btns.length) btns[btns.length-1].click();
 }
