@@ -68,12 +68,45 @@ export function sysPrompt(strategy) {
   return "Continue this discussion from the provided context. Match tone and formatting. Be concise and technical.";
 }
 
-export async function run(messages, { temperature=0.7, max_tokens=1024, onToken } = {}){
+export async function run(messages, { temperature = 0.7, max_tokens = 1024, onToken } = {}) {
   if (!engine) throw new Error("Model not ready");
-  let acc = "";
-  await engine.chat.completions.create(
-    { stream: true, messages, temperature, max_tokens },
-    { onToken: (t) => { acc += t; onToken?.(acc); } }
-  );
-  return acc;
+
+  // Try streaming first; if the runtime doesn't stream, fall back to non-stream.
+  let out = "";
+
+  try {
+    const result = await engine.chat.completions.create(
+      { messages, temperature, max_tokens, stream: true },
+      {
+        onToken: (t) => {
+          out += t;
+          onToken?.(out);
+        },
+      }
+    );
+
+    // Some runtimes return a final object even with stream=true — capture it.
+    if (!out && result && typeof result === "object") {
+      const text =
+        result.choices?.[0]?.delta?.content ??
+        result.choices?.[0]?.message?.content ??
+        "";
+      out = text || out;
+      if (out) onToken?.(out);
+    }
+  } catch (e) {
+    // Fallback to non-streaming
+    const r = await engine.chat.completions.create({
+      messages,
+      temperature,
+      max_tokens,
+      stream: false,
+    });
+    const text = r?.choices?.[0]?.message?.content ?? "";
+    out = text;
+    onToken?.(out);
+  }
+
+  if (!out) out = "(no content returned)";
+  return out;
 }

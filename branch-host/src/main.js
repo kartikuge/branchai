@@ -45,20 +45,26 @@ function buildMessages(extra, strategy) {
 }
 
 async function runCurrent() {
-  const b = currentBranch(); if (!b) return alert('Select or create a branch first.');
-  const extra = $('extra').value; const strategy = $('strategySel').value;
+  const b = currentBranch();
+  if (!b) { alert("Select or create a branch first."); return; }
+
+  const extra = $('extra').value;
+  const strategy = $('strategySel').value;
   $('out').textContent = '';
+
   try {
     const output = await run(buildMessages(extra, strategy), {
-      temperature: 0.7, max_tokens: 1024,
+      temperature: 0.7,
+      max_tokens: 1024,
       onToken: (txt) => { $('out').textContent = txt; }
     });
-    // Save turn(s)
-    if (extra?.trim()) b.messages.push({ role:'user', content: extra.trim(), ts: now() });
-    b.messages.push({ role:'assistant', content: $('out').textContent, ts: now() });
+
+    if (extra?.trim()) b.messages.push({ role: 'user', content: extra.trim(), ts: now() });
+    b.messages.push({ role: 'assistant', content: $('out').textContent || output, ts: now() });
     b.model = getCurrentModel(); b.updatedAt = now();
     await persist();
   } catch (e) {
+    console.error('[StormAI] run error', e);
     $('out').textContent = 'error: ' + (e?.message || e);
   }
 }
