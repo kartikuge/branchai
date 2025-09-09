@@ -1,3 +1,3 @@
 # branchai
 
-# hi, i am making something new, work in progress
+hi, i am making something new, work in progress
