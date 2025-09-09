@@ -1,4 +1,7 @@
+// state.js
+
 import { genId, now } from './utils.js';
+
 export const state = { projects: [], activeProjectId: null, activeBranchId: null };
 
 export function currentProject() {
@@ -24,12 +27,11 @@ export async function loadInitial(injectedTranscript, anchorIdx = null) {
   }
 
   if (injectedTranscript?.length) {
-    // Create a project and a first branch from the imported chat
     const pid = genId('prj');
     const bid = genId('br');
-    const baseName = 'Branched from Chat';
-    const cut = Number.isFinite(anchorIdx) ? Math.max(0, Math.min(anchorIdx, injectedTranscript.length-1)) : injectedTranscript.length-1;
-    const initialMessages = injectedTranscript.slice(0, cut + 1);
+    const cut = Number.isFinite(anchorIdx)
+      ? Math.max(0, Math.min(anchorIdx, injectedTranscript.length - 1))
+      : injectedTranscript.length - 1;
 
     state.projects.unshift({
       id: pid,
@@ -37,13 +39,35 @@ export async function loadInitial(injectedTranscript, anchorIdx = null) {
       createdAt: now(),
       branches: [{
         id: bid,
-        title: baseName,
+        title: 'Branched from Chat',
         createdAt: now(),
-        messages: initialMessages
+        messages: injectedTranscript.slice(0, cut + 1)
       }]
     });
     state.activeProjectId = pid;
     state.activeBranchId = bid;
     await persist();
   }
+}
+
+/**
+ * Create a new branch in the current project.
+ * @param {string} title - Branch title
+ * @param {Array<{role:string, content:string, ts?:number}>} seedMessages - Initial messages (optional)
+ * @returns {object|null} new branch
+ */
+export function newBranch(title = 'New Branch', seedMessages = []) {
+  const p = currentProject();
+  if (!p) return null;
+  const br = {
+    id: genId('br'),
+    title,
+    createdAt: now(),
+    messages: Array.isArray(seedMessages) ? [...seedMessages] : []
+  };
+  // put newest on top
+  p.branches = [br, ...(p.branches || [])];
+  state.activeBranchId = br.id;
+  persist(); // fire-and-forget
+  return br;
 }
