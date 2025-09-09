@@ -4,6 +4,24 @@ import { genId, now } from './utils.js';
 
 export const state = { projects: [], activeProjectId: null, activeBranchId: null };
 
+// --- add this helper near the top ---
+function normalizeState() {
+  if (!Array.isArray(state.projects)) state.projects = [];
+  for (const p of state.projects) {
+    if (!Array.isArray(p.branches)) p.branches = [];
+  }
+  // fix active ids
+  const p = state.projects.find(x => x.id === state.activeProjectId) || state.projects[0] || null;
+  if (p) {
+    state.activeProjectId = p.id;
+    const b = p.branches.find(x => x.id === state.activeBranchId) || p.branches[0] || null;
+    state.activeBranchId = b ? b.id : null;
+  } else {
+    state.activeProjectId = null;
+    state.activeBranchId = null;
+  }
+}
+
 export function currentProject() {
   return state.projects.find(p => p.id === state.activeProjectId) || null;
 }
@@ -42,42 +60,35 @@ export function newProject(
   state.projects = [proj, ...state.projects];
   state.activeProjectId = pid;
 
+  normalizeState();
   persist(); // fire-and-forget
   return proj;
 }
 
+
 export async function loadInitial(injectedTranscript, anchorIdx = null) {
+  // 1) load any saved state
   const raw = localStorage.getItem('stormai_state_v1');
   if (raw) Object.assign(state, JSON.parse(raw));
+  normalizeState();
 
-  if (!state.projects.length) {
-    state.projects = [];
-    state.activeProjectId = null;
-    state.activeBranchId = null;
-  }
-
-  if (injectedTranscript?.length) {
-    const pid = genId('prj');
-    const bid = genId('br');
+  // 2) if we got a transcript, create a new project + seeded first branch
+  if (Array.isArray(injectedTranscript) && injectedTranscript.length) {
     const cut = Number.isFinite(anchorIdx)
       ? Math.max(0, Math.min(anchorIdx, injectedTranscript.length - 1))
       : injectedTranscript.length - 1;
-
-    state.projects.unshift({
-      id: pid,
-      name: 'New Project',
-      createdAt: now(),
-      branches: [{
-        id: bid,
-        title: 'Branched from Chat',
-        createdAt: now(),
-        messages: injectedTranscript.slice(0, cut + 1)
-      }]
-    });
-    state.activeProjectId = pid;
-    state.activeBranchId = bid;
-    await persist();
+    const seed = injectedTranscript.slice(0, cut + 1);
+    newProject('New Project', seed, 'Branched from Chat'); // sets actives & persists
   }
+
+  // 3) if still nothing to render, create an empty scratch project
+  if (!state.projects.length) {
+    newProject('Scratchpad');
+  }
+
+  // 4) final normalize + persist
+  normalizeState();
+  await persist();
 }
 
 /**
@@ -98,6 +109,7 @@ export function newBranch(title = 'New Branch', seedMessages = []) {
   // put newest on top
   p.branches = [br, ...(p.branches || [])];
   state.activeBranchId = br.id;
+  normalizeState();
   persist(); // fire-and-forget
   return br;
 }

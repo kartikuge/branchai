@@ -7,7 +7,7 @@ const $ = (id) => document.getElementById(id);
 
 function getInjectedContext() {
   if (Array.isArray(window.__BRANCH_CONTEXT) && window.__BRANCH_CONTEXT.length) {
-    return { ctx: window.__BRANCH_CONTEXT, anchor: window.__BRANCH_ANCHOR ?? window.__BRANCH_CONTEXT.length - 1 };
+    return { ctx: window.__BRANCH_CONTEXT, anchor: window.__BRANCH_ANCHOR ?? (window.__BRANCH_CONTEXT.length - 1) };
   }
   try {
     const raw = sessionStorage.getItem('stormai_ctx');
@@ -30,25 +30,23 @@ bindStaticControls({
 });
 
 (async function boot() {
-  const inj = getInjectedContext();
-  await loadInitial(inj?.ctx, inj?.anchor);   // <— seed project/branch
+  // 1) Load saved state and/or seeded transcript (if the extension injected it already)
+  const inj = getInjectedContext();                 // may be null
+  await loadInitial(inj?.ctx, inj?.anchor);         // creates project/branch if ctx exists, else Scratchpad
   renderAll();
-  await initModel(document.getElementById('modelSel').value, (t,l)=>setModelStatus(t,l));
-  updateStorageStatus('storage: local');
 
-  // If context arrives a bit late
+  // 2) Bring model online (status banner updates via setModelStatus)
+  const modelSel = document.getElementById('modelSel'); // adjust if your select has a different id
+  const modelId = modelSel ? modelSel.value : 'Llama-3.2-3B-Instruct-q4f32_1-MLC';
+  await initModel(modelId, (text, level) => setModelStatus(text, level));
+
+  // 3) If context arrives a bit later (background inject after tab load), consume it and re-render
   window.addEventListener('stormai:ctx-ready', async () => {
     const late = getInjectedContext();
     if (late?.ctx?.length) {
-      await loadInitial(late.ctx, late.anchor);
+      await loadInitial(late.ctx, late.anchor);     // prepends a new project with branched transcript
       renderAll();
     }
-  });
-
-  // Enter-to-send
-  const ta = document.getElementById('extra');
-  ta.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendMessage(); }
   });
 })();
 

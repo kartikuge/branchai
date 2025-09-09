@@ -35,52 +35,102 @@ export function setModelStatus(text, level='') {
   el.className = 'pill ' + (level==='ok'?'status-ok':level==='bad'?'status-bad':'');
 }
 
-export function renderAll() { renderProjects(); renderBranches(); renderTranscript(); }
+export function renderAll() { 
+    const p = currentProject();
+
+  // SAFE EMPTY VIEW if nothing is loaded yet (e.g., first boot, no transcript injected yet)
+  if (!p) {
+    const $ = (id) => document.getElementById(id);
+    if ($('projects'))   $('projects').innerHTML   = '<div class="muted">No project yet</div>';
+    if ($('branches'))   $('branches').innerHTML   = '';
+    if ($('transcript')) $('transcript').innerHTML = '';
+    if ($('out'))        $('out').textContent      = '';
+    return;
+  }
+
+  // normal render flow
+  renderProjects();
+  renderBranches();
+  renderTranscript();
+ }
 
 export function renderProjects() {
-  const wrap = $('projects'); wrap.innerHTML = '';
-  state.projects.sort((a,b)=>b.updatedAt-a.updatedAt).forEach(p => {
-    const div = document.createElement('div');
-    div.className = 'list-item' + (p.id===state.currentProjectId?' active':'');
-    div.textContent = p.name || '(unnamed)'; div.title = new Date(p.updatedAt).toLocaleString();
-    div.onclick = async () => { state.currentProjectId = p.id; state.currentBranchId = null; await persist(); renderAll(); };
-    wrap.appendChild(div);
+  const projects = Array.isArray(state.projects) ? state.projects : [];   // GUARD
+  const el = document.getElementById('projects');
+  if (!el) return;
+
+  el.innerHTML = projects.map(p => `
+    <div class="project-item ${p.id === state.activeProjectId ? 'active' : ''}" data-project="${p.id}">
+      <span>${p.name}</span>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.project-item').forEach(node => {
+    node.addEventListener('click', () => {
+      state.activeProjectId = node.dataset.project;
+      // also ensure an active branch exists
+      const proj = projects.find(x => x.id === state.activeProjectId);
+      if (proj && Array.isArray(proj.branches) && proj.branches[0]) {
+        state.activeBranchId = proj.branches[0].id;
+      } else {
+        state.activeBranchId = null;
+      }
+      persist();
+      renderAll();
+    });
   });
-  const cp = currentProject();
-  $('projectName').value = cp ? cp.name : '';
 }
 
 export function renderBranches() {
-  const wrap = $('branches'); wrap.innerHTML = '';
-  const list = state.branches.filter(b=>b.projectId===state.currentProjectId);
-  list.sort((a,b)=>b.updatedAt-a.updatedAt).forEach(b => {
-    const div = document.createElement('div');
-    div.className = 'list-item' + (b.id===state.currentBranchId?' active':'');
-    div.textContent = b.title || '(untitled branch)'; div.title = new Date(b.updatedAt).toLocaleString();
-    div.onclick = async () => { state.currentBranchId = b.id; await persist(); renderAll(); };
-    wrap.appendChild(div);
+  const p = currentProject();
+  const branches = Array.isArray(p?.branches) ? p.branches : [];  // GUARD
+
+  const el = document.getElementById('branches');
+  if (!el) return;
+
+  el.innerHTML = branches.map(b => `
+    <div class="branch-item ${b.id === state.activeBranchId ? 'active' : ''}" data-branch="${b.id}">
+      <span>${b.title}</span>
+    </div>
+  `).join('');
+
+  // (re)bind clicks to switch active branch…
+  el.querySelectorAll('.branch-item').forEach(node => {
+    node.addEventListener('click', () => {
+      state.activeBranchId = node.dataset.branch;
+      persist();
+      renderAll();
+    });
   });
 }
 
 export function renderTranscript() {
-  const tp = $('transcript'); tp.innerHTML = '';
   const b = currentBranch();
-  if (!b) { tp.innerHTML = '<p class="muted">No branch selected.</p>'; $('tokenInfo').textContent='~0 tokens'; return; }
-  const frag = document.createDocumentFragment();
-  b.messages.forEach((m, idx) => {
-    const d = document.createElement('div');
-    d.className = 'msg ' + (m.role === 'assistant' ? 'assistant' : 'user');
-    d.innerHTML = `
-      <div class="role">${m.role}</div>
-      <div class="content">${escapeHtml(m.content)}</div>
-      <div class="row" style="margin-top:6px">
-        <button class="btn" data-idx="${idx}">Branch from here</button>
-      </div>`;
-    d.querySelector('button').onclick = () => branchFromIndex(idx);
-    frag.appendChild(d);
+  const messages = Array.isArray(b?.messages) ? b.messages : [];   // GUARD
+  const el = document.getElementById('transcript');
+  if (!el) return;
+
+  el.innerHTML = messages.map((m, idx) => `
+    <div class="msg ${m.role}">
+      <div class="meta">
+        <button class="branch-here" data-idx="${idx}">Branch from here</button>
+      </div>
+      <div class="content">${m.content}</div>
+    </div>
+  `).join('');
+
+  // “Branch from here” creates a new branch with messages up to idx
+  el.querySelectorAll('.branch-here').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = Number(btn.dataset.idx);
+      const seed = messages.slice(0, i + 1);
+      const nb = newBranch(`Branch of ${b?.title || 'Untitled'}`, seed);
+      if (nb) {
+        persist();
+        renderAll();
+      }
+    });
   });
-  tp.appendChild(frag);
-  $('tokenInfo').textContent = `~${estimateTokens(b.messages)} ctx tokens`;
 }
 
 async function branchFromIndex(idx) {
