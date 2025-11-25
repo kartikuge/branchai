@@ -1,46 +1,112 @@
-// WHY: isolate WebLLM details (init, switching models, streaming generation).
-const webllm = window.webllm;
-
+// ESM-based loader for WebLLM (no UMD, no /dist)
+// Pin a recent version that works well in browsers
+const VER = "0.2.79";  // or latest that works for you
+let webllm;            // module namespace
 let engine = null;
 let currentModel = null;
 
-export function getCurrentModel() { return currentModel; }
+function setStatus(cb, text, lvl="info"){ cb?.(text, lvl); }
 
-export async function initModel(modelId, onStatus) {
-  if (!('gpu' in navigator)) {
-    onStatus?.('WebGPU not available', 'bad');
+export function getCurrentModel(){ return currentModel; }
+
+async function loadWebLLM(onStatus) {
+  const VER = "0.2.79";
+  const cdns = [
+    `https://esm.run/@mlc-ai/web-llm@${VER}`,
+    `https://esm.sh/@mlc-ai/web-llm@${VER}`,
+    `https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@${VER}/lib/index.js`
+  ];
+  for (const url of cdns) {
+    try {
+      onStatus?.(`loading WebLLM SDK… (${new URL(url).host})`, "warn");
+      return await import(url);
+    } catch (e) {/* try next */}
+  }
+  throw new Error("Failed to load WebLLM SDK from all CDNs");
+}
+
+export async function initModel(modelId, onStatus){
+  if (!("gpu" in navigator)) {
+    setStatus(onStatus, "WebGPU not available (update Chrome/Edge)", "bad");
     return null;
   }
-  onStatus?.('loading model… (first time may take minutes)', 'warn');
+
+  // dynamic-import the sdk from esm.run
+  webllm = await loadWebLLM(onStatus);
+
   currentModel = modelId;
-  engine = await webllm.CreateWebWorkerMLCEngine(
-    new URL("https://unpkg.com/@mlc-ai/web-llm@0.2.62/dist/"),
-    { model: modelId }
-  );
-  onStatus?.(`ready: ${modelId}`, 'ok');
+  setStatus(onStatus, "loading model… (first run downloads weights)", "warn");
+
+  // Use the *prebuilt* engine (it knows where to fetch model libs/weights)
+  engine = await webllm.CreateMLCEngine(modelId, {
+    initProgressCallback: (p) => {
+      // p has fields like progress, text
+      if (typeof p?.progress === "number") {
+        const pct = Math.round(p.progress * 100);
+        setStatus(onStatus, `downloading ${pct}%${p.text ? " – "+p.text : ""}`, "warn");
+      } else if (p?.text) {
+        setStatus(onStatus, p.text, "warn");
+      }
+    },
+    logLevel: "INFO",
+  });
+
+  setStatus(onStatus, `ready: ${modelId}`, "ok");
   return engine;
 }
 
-export async function switchModel(modelId, onStatus) {
+export async function switchModel(modelId, onStatus){
   try { engine?.unload?.(); } catch {}
   return initModel(modelId, onStatus);
 }
 
 export function sysPrompt(strategy) {
-  if (strategy === 'critic')
+  if (strategy === "critic")
     return "Critique the prior approach in ≤5 bullets, then output improved answer prefixed with 'Final:'. Be concise and technical.";
-  if (strategy === 'plan')
-    return "First output a numbered plan (3–7 steps), then execute it. Keep steps short and technical.";
+  if (strategy === "plan")
+    return "First output a numbered plan (3-7 steps), then execute it. Keep steps short and technical.";
   return "Continue this discussion from the provided context. Match tone and formatting. Be concise and technical.";
 }
 
-export async function run(messages, { temperature=0.7, max_tokens=1024, onToken } = {}) {
-  if (!engine) throw new Error('Model not ready');
-  let output = '';
-  await engine.chat.completions.create({
-    stream: true, messages, temperature, max_tokens
-  }, {
-    onToken: (t) => { output += t; onToken?.(output); }
-  });
-  return output;
+export async function run(messages, { temperature = 0.7, max_tokens = 1024, onToken } = {}) {
+  if (!engine) throw new Error("Model not ready");
+
+  // Try streaming first; if the runtime doesn't stream, fall back to non-stream.
+  let out = "";
+
+  try {
+    const result = await engine.chat.completions.create(
+      { messages, temperature, max_tokens, stream: true },
+      {
+        onToken: (t) => {
+          out += t;
+          onToken?.(out);
+        },
+      }
+    );
+
+    // Some runtimes return a final object even with stream=true — capture it.
+    if (!out && result && typeof result === "object") {
+      const text =
+        result.choices?.[0]?.delta?.content ??
+        result.choices?.[0]?.message?.content ??
+        "";
+      out = text || out;
+      if (out) onToken?.(out);
+    }
+  } catch (e) {
+    // Fallback to non-streaming
+    const r = await engine.chat.completions.create({
+      messages,
+      temperature,
+      max_tokens,
+      stream: false,
+    });
+    const text = r?.choices?.[0]?.message?.content ?? "";
+    out = text;
+    onToken?.(out);
+  }
+
+  if (!out) out = "(no content returned)";
+  return out;
 }

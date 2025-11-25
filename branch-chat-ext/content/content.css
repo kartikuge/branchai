@@ -13,3 +13,4 @@
   transition: opacity .15s ease;
 }
 .branch-anchor:hover .branch-chat-btn { opacity: 1; }
+.storm-branch-btn:hover { background: #f6f6f6; }
