@@ -1,0 +1,15 @@
+.branch-chat-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font: 12px/1.2 system-ui, sans-serif;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,.15);
+  background: rgba(255,255,255,.9);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+*:hover > .branch-chat-btn { opacity: 1; }
+.branch-chat-btn:hover { background: #f6f6f6; }
