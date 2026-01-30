@@ -9,6 +9,7 @@ export const state = {
   settings: {
     activeProvider: 'ollama',
     defaultModel: null,
+    darkMode: false,
     ollama: { url: 'http://localhost:11434' },
     openai: { apiKey: '' },
     anthropic: { apiKey: '' },
@@ -23,11 +24,13 @@ function normalizeState() {
     state.settings = {
       activeProvider: 'ollama',
       defaultModel: null,
+      darkMode: false,
       ollama: { url: 'http://localhost:11434' },
       openai: { apiKey: '' },
       anthropic: { apiKey: '' },
     };
   }
+  if (typeof state.settings.darkMode !== 'boolean') state.settings.darkMode = false;
   for (const p of state.projects) {
     if (!Array.isArray(p.branches)) p.branches = [];
   }

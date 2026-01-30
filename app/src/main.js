@@ -6,6 +6,13 @@ import { now } from './utils.js';
 
 const $ = (id) => document.getElementById(id);
 
+function applyTheme() {
+  const dark = !!state.settings.darkMode;
+  document.documentElement.classList.toggle('dark', dark);
+  const btn = $('darkModeToggle');
+  if (btn) btn.textContent = dark ? 'Light' : 'Dark';
+}
+
 let activeProvider = null;
 let currentModelId = null;
 
@@ -271,10 +278,20 @@ bindStaticControls({
   },
 });
 
+const darkModeBtn = $('darkModeToggle');
+if (darkModeBtn) {
+  darkModeBtn.onclick = () => {
+    state.settings.darkMode = !state.settings.darkMode;
+    updateSettings({ darkMode: state.settings.darkMode });
+    applyTheme();
+  };
+}
+
 (async function boot() {
   // 1) Load state + any injected context
   const inj = await getInjectedContext();
   await loadInitial(inj?.ctx, inj?.anchor, inj?.title);
+  applyTheme();
   renderAll();
 
   // 2) Populate provider dropdown and connect
