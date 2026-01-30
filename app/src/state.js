@@ -90,7 +90,7 @@ export function newProject(name = 'New Project', seedMessages = null, firstBranc
       id: bid,
       title: firstBranchTitle,
       createdAt: now(),
-      messages: [...seedMessages],
+      messages: seedMessages.map(m => ({ ...m })),
     });
     state.activeBranchId = bid;
   }
@@ -109,7 +109,7 @@ export function newBranch(title = 'New Branch', seedMessages = []) {
     id: genId('br'),
     title,
     createdAt: now(),
-    messages: Array.isArray(seedMessages) ? [...seedMessages] : [],
+    messages: Array.isArray(seedMessages) ? seedMessages.map(m => ({ ...m })) : [],
   };
   p.branches = [br, ...(p.branches || [])];
   state.activeBranchId = br.id;

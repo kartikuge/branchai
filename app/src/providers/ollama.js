@@ -6,7 +6,7 @@ export class OllamaProvider extends BaseProvider {
   get name() { return 'Ollama (local)'; }
 
   get baseUrl() {
-    return (this.config.ollamaUrl || 'http://localhost:11434').replace(/\/+$/, '');
+    return (this.config.url || 'http://localhost:11434').replace(/\/+$/, '');
   }
 
   async listModels() {

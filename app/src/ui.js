@@ -64,6 +64,9 @@ export function renderAll() {
   renderTranscript();
   updateTokenInfo();
 
+  // Clear stale assistant output when switching branches
+  if ($('out')) $('out').textContent = '';
+
   // Sync project name input
   const nameInput = $('projectName');
   if (nameInput) nameInput.value = p.name || '';

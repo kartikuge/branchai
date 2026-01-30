@@ -6,10 +6,10 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 
 ---
 
-## Current State (Phase 1 Complete)
+## Current State (Phase 2 Complete)
 
 **Branch:** `v2_refactor`
-**Status:** All Phase 1 files written, not yet committed.
+**Status:** Phase 1 committed. Phase 2 bugs fixed, pending manual testing.
 
 ### New files created (all untracked)
 
@@ -54,15 +54,44 @@ branch-chat-ext/      # Old Chrome extension (replaced by new root-level structu
 | `buildMessages()` caps at 12 msgs | Sends ALL branch messages now |
 | localStorage only | `chrome.storage.local` with localStorage fallback |
 
+### Bugs fixed in Phase 2
+
+| Bug | Fix |
+|-----|-----|
+| Ollama config key mismatch (`ollamaUrl` vs `url`) | `ollama.js` now reads `this.config.url` to match settings shape |
+| Shared message refs between branches (shallow copy) | `newBranch()` and `newProject()` deep-copy with `.map(m => ({...m}))` |
+| Stale output on branch switch | `renderAll()` clears `$('out')` on every render |
+
+---
+
+## How to Test Phase 2
+
+**Setup:** Load/reload extension in `chrome://extensions` (Developer mode), click icon.
+
+1. **Default state** — "Scratchpad" project + "Main" branch visible, transcript empty, output empty
+2. **New Branch button** — Click "New Branch" → new entry appears, is active, transcript empty, Main still listed
+3. **Branch switching preserves messages** — Add messages to Main (via Run or DevTools), switch to New Branch (should be empty, output clears), switch back (messages intact)
+4. **"Branch from here" (first msg)** — Hover first message on Main, click "branch here" → new branch has exactly 1 message, Main unchanged
+5. **"Branch from here" (middle msg)** — With 2+ messages on Main, branch from msg 2 → new branch has 2 messages
+6. **Independent conversations** — Add a message on a branched branch → switch to Main → Main does NOT have it → switch back → branched branch does
+7. **Output clears on switch** — Put text in output (Run or DevTools), switch branches → output empty
+8. **Ollama URL setting** — Settings → change URL to `http://localhost:99999` → Save → error status. Change back to `http://localhost:11434` → connected
+9. **Delete branch** — Delete non-active branch (disappears), delete active branch (falls back to another)
+10. **Persistence** — Create projects/branches/messages, close tab, reopen → everything restored
+
+DevTools shortcut for injecting test messages (no Ollama needed):
+```js
+import('/app/src/state.js').then(m => {
+  const b = m.currentBranch();
+  b.messages.push({role:'user',content:'Hello from Main'});
+  b.messages.push({role:'assistant',content:'Hi back from Main'});
+  m.persist();
+}).then(() => location.reload());
+```
+
 ---
 
 ## Remaining Phases
-
-### Phase 2: Branching works correctly
-- Verify "Branch from here" buttons on each message create a new branch with messages[0..idx]
-- Verify "New Branch" sidebar button works
-- Verify switching branches preserves each branch's messages independently
-- Test that branched conversations continue independently
 
 ### Phase 3: Cloud providers (OpenAI + Anthropic)
 - Create `app/src/providers/openai.js` — SSE streaming, Bearer auth
@@ -108,4 +137,4 @@ branch-chat-ext/      # Old Chrome extension (replaced by new root-level structu
 
 ## Resume Point
 
-**Start here tomorrow:** Phase 2 — verify branching logic works end-to-end, fix anything broken during manual testing of Phase 1. Then move to Phase 3 (cloud providers).
+**Next up:** Run Phase 2 manual tests (see above). Once passing, commit Phase 2 and start Phase 3 — cloud providers (OpenAI + Anthropic).
