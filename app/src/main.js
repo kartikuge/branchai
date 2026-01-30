@@ -1,6 +1,6 @@
 // main.js — provider-based orchestration
 import { loadInitial, persist, state, currentBranch, updateSettings } from './state.js';
-import { bindStaticControls, renderAll, setModelStatus, openSettingsModal, getSettingsValues } from './ui.js';
+import { bindStaticControls, renderAll, setModelStatus, openSettingsModal, getSettingsValues, setCurrentModelId } from './ui.js';
 import { getProvider, listProviders } from './providers/registry.js';
 import { now } from './utils.js';
 
@@ -16,9 +16,9 @@ async function getInjectedContext() {
     const result = await chrome.storage.session.get('branchai_pending');
     if (result.branchai_pending) {
       await chrome.storage.session.remove('branchai_pending');
-      const { transcript, anchorIndex } = result.branchai_pending;
+      const { transcript, anchorIndex, title } = result.branchai_pending;
       if (Array.isArray(transcript) && transcript.length) {
-        return { ctx: transcript, anchor: anchorIndex ?? transcript.length - 1 };
+        return { ctx: transcript, anchor: anchorIndex ?? transcript.length - 1, title: title || null };
       }
     }
   } catch { /* not in extension context */ }
@@ -68,7 +68,7 @@ async function activateProvider(providerId) {
   await populateModels();
 }
 
-async function populateModels() {
+async function populateModels(selectModelId) {
   const sel = $('modelSel');
   if (!sel || !activeProvider) return;
   try {
@@ -84,14 +84,49 @@ async function populateModels() {
       opt.textContent = m.name;
       sel.appendChild(opt);
     }
-    // Restore previously selected model or use first
-    if (state.settings.defaultModel && models.some(m => m.id === state.settings.defaultModel)) {
-      sel.value = state.settings.defaultModel;
+    // Use explicit model if provided, then branch model, then global default
+    const target = selectModelId || state.settings.defaultModel;
+    if (target && models.some(m => m.id === target)) {
+      sel.value = target;
     }
     currentModelId = sel.value;
+    setCurrentModelId(currentModelId);
   } catch (e) {
     sel.innerHTML = '<option>error loading models</option>';
     setModelStatus(`model list failed: ${e.message}`, 'bad');
+  }
+}
+
+/**
+ * Restore the branch's saved provider/model into the header dropdowns.
+ * Called after renderAll (branch switch).
+ */
+async function syncBranchProvider() {
+  const b = currentBranch();
+  const branchProvider = b?.provider || state.settings.activeProvider;
+  const branchModel = b?.model || null;
+
+  // If branch uses a different provider than what's active, switch
+  if (branchProvider !== activeProvider?.id) {
+    $('providerSel').value = branchProvider;
+    await activateProvider(branchProvider);
+    // activateProvider calls populateModels; now set the model
+    if (branchModel) {
+      const sel = $('modelSel');
+      if (sel && [...sel.options].some(o => o.value === branchModel)) {
+        sel.value = branchModel;
+        currentModelId = branchModel;
+        setCurrentModelId(currentModelId);
+      }
+    }
+  } else if (branchModel) {
+    // Same provider, just select the model
+    const sel = $('modelSel');
+    if (sel && [...sel.options].some(o => o.value === branchModel)) {
+      sel.value = branchModel;
+      currentModelId = branchModel;
+      setCurrentModelId(currentModelId);
+    }
   }
 }
 
@@ -132,19 +167,25 @@ async function sendMessage() {
     renderAll();
   }
 
-  const model = $('modelSel').value;
+  // Use branch provider/model if set, falling back to current UI selection
+  const providerId = b.provider || activeProvider.id;
+  let provider = activeProvider;
+  if (providerId !== activeProvider.id) {
+    const config = state.settings[providerId] || {};
+    provider = getProvider(providerId, config);
+  }
+  const model = b.model || $('modelSel').value;
   if (!model || model === '--' || model === 'no models found') {
     return alert('No model selected.');
   }
 
-  setModelStatus(`${activeProvider.name}: generating...`);
+  setModelStatus(`${provider.name}: generating...`);
   $('runBtn').disabled = true;
 
   try {
     const messages = buildMessages(null);
-    const output = await activeProvider.chatStream(messages, {
+    const output = await provider.chatStream(messages, {
       model,
-      temperature: 0.7,
       max_tokens: 2048,
       onToken: (txt) => { $('out').textContent = txt; },
     });
@@ -152,15 +193,15 @@ async function sendMessage() {
     const assistantText = $('out').textContent || output || '(no content)';
     b.messages.push({ role: 'assistant', content: assistantText, ts: now() });
     b.model = model;
-    b.provider = state.settings.activeProvider;
+    b.provider = providerId;
     b.updatedAt = now();
     await persist();
     renderAll();
-    setModelStatus(`${activeProvider.name}: connected`, 'ok');
+    setModelStatus(`${provider.name}: connected`, 'ok');
   } catch (e) {
     console.error('[BranchAI] run error', e);
     $('out').textContent = 'Error: ' + (e?.message || e);
-    setModelStatus(`${activeProvider.name}: error`, 'bad');
+    setModelStatus(`${provider.name}: error`, 'bad');
   } finally {
     $('runBtn').disabled = false;
   }
@@ -185,21 +226,43 @@ bindStaticControls({
     const text = $('out').textContent || '';
     if (text) await navigator.clipboard.writeText(text);
   },
-  onProviderChange: (e) => activateProvider(e.target.value),
+  onProviderChange: async (e) => {
+    const id = e.target.value;
+    await activateProvider(id);
+    // Save to current branch
+    const b = currentBranch();
+    if (b) {
+      b.provider = id;
+      b.model = $('modelSel').value || null;
+      persist();
+    }
+  },
   onModelChange: (e) => {
     currentModelId = e.target.value;
+    setCurrentModelId(currentModelId);
     state.settings.defaultModel = currentModelId;
-    persist();
+    // Save to current branch
+    const b = currentBranch();
+    if (b) {
+      b.model = currentModelId;
+      persist();
+    }
   },
   onImport: async (e) => {
     const mod = await import('./export_import.js');
-    await mod.importFromFile(e.target.files?.[0]);
+    try {
+      await mod.importFromFile(e.target.files?.[0]);
+      renderAll();
+    } catch (err) {
+      $('out').textContent = 'Import error: ' + (err?.message || err);
+    }
     e.target.value = '';
   },
   onExport: async () => {
     const mod = await import('./export_import.js');
     mod.exportCurrentProject();
   },
+  onBranchSwitch: () => syncBranchProvider(),
   onSettingsOpen: () => {
     openSettingsModal();
     // Wire save button after modal is created
@@ -211,19 +274,28 @@ bindStaticControls({
 (async function boot() {
   // 1) Load state + any injected context
   const inj = await getInjectedContext();
-  await loadInitial(inj?.ctx, inj?.anchor);
+  await loadInitial(inj?.ctx, inj?.anchor, inj?.title);
   renderAll();
 
   // 2) Populate provider dropdown and connect
   populateProviders();
   await activateProvider(state.settings.activeProvider);
 
-  // 3) Listen for late context injection
+  // 3) Listen for late context injection (from branchai:ctx-ready custom event)
   window.addEventListener('branchai:ctx-ready', async () => {
     const late = await getInjectedContext();
     if (late?.ctx?.length) {
-      await loadInitial(late.ctx, late.anchor);
+      await loadInitial(late.ctx, late.anchor, late.title);
       renderAll();
     }
   });
+
+  // 4) Listen for CTX_READY message from background (tab reuse path)
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg?.type === 'CTX_READY') {
+        window.dispatchEvent(new Event('branchai:ctx-ready'));
+      }
+    });
+  } catch { /* not in extension context */ }
 })();

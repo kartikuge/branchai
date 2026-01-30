@@ -1,8 +1,12 @@
 // providers/registry.js — provider factory and instance cache
 import { OllamaProvider } from './ollama.js';
+import { OpenAIProvider } from './openai.js';
+import { AnthropicProvider } from './anthropic.js';
 
 const providerClasses = {
   ollama: OllamaProvider,
+  openai: OpenAIProvider,
+  anthropic: AnthropicProvider,
 };
 
 const instances = new Map();

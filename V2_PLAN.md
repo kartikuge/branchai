@@ -6,10 +6,10 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 
 ---
 
-## Current State (Phase 2 Complete)
+## Current State (Phase 5 Complete)
 
 **Branch:** `v2_refactor`
-**Status:** Phase 1 committed. Phase 2 bugs fixed, pending manual testing.
+**Status:** Phases 1–5 complete. Phase 4 (content script integration) still needs testing.
 
 ### New files created (all untracked)
 
@@ -93,23 +93,50 @@ import('/app/src/state.js').then(m => {
 
 ## Remaining Phases
 
-### Phase 3: Cloud providers (OpenAI + Anthropic)
-- Create `app/src/providers/openai.js` — SSE streaming, Bearer auth
-- Create `app/src/providers/anthropic.js` — SSE streaming, `x-api-key` + `anthropic-dangerous-direct-browser-access` headers, handle Anthropic message format (system as separate field, merge consecutive same-role messages)
-- Register both in `registry.js`
-- Add settings UI: API key inputs with test-connection buttons
-- Add per-branch provider/model selector (different branches can use different models)
+### Phase 3: Cloud providers (OpenAI + Anthropic) — DONE
+
+#### New files
+| File | Description |
+|------|-------------|
+| `app/src/providers/openai.js` | OpenAI provider — `Bearer` auth, `GET /models` (filtered to `gpt-*`), `/chat/completions` streaming (SSE `data:` lines, `[DONE]` sentinel), uses `max_completion_tokens`, omits `temperature` by default to support reasoning models (o1/o3/o4) |
+| `app/src/providers/anthropic.js` | Anthropic provider — `x-api-key` + `anthropic-version` + `anthropic-dangerous-direct-browser-access` headers, hardcoded model list (Sonnet 4, Haiku 3.5, Opus 3, 3.5 Sonnet, 3 Haiku), `_prepareMessages()` extracts system → top-level `system` field + merges consecutive same-role messages, SSE via `event: content_block_delta` / `event: message_stop`, `testConnection()` sends minimal 1-token request |
+
+#### Modified files
+| File | Change |
+|------|--------|
+| `app/src/providers/registry.js` | Imported + registered `OpenAIProvider` and `AnthropicProvider` in `providerClasses` |
+| `app/src/ui.js` | Added `getProvider` import; settings modal inputs wrapped in `.setting-row` with "Test" button + result `<span>` per provider; `_testProvider()` helper; `onBranchSwitch` callback called at end of `renderAll()` |
+| `app/src/main.js` | `populateModels()` accepts optional `selectModelId`; new `syncBranchProvider()` restores branch provider/model on switch; `sendMessage()` uses branch `provider`/`model` with fallback to global; `onProviderChange`/`onModelChange` save to current branch; removed hardcoded `temperature: 0.7` from `sendMessage()` |
+| `app/app.css` | Added `.setting-row`, `.btn-sm`, `.test-result`, `.test-ok`, `.test-fail` styles |
+
+#### Bugs fixed during Phase 3
+| Bug | Fix |
+|-----|-----|
+| OpenAI rejects `max_tokens` on newer models | Changed to `max_completion_tokens` |
+| OpenAI reasoning models (o1/o3/o4) reject custom `temperature` | Temperature only sent when explicitly provided by caller; removed hardcoded `0.7` from `sendMessage()` |
 
 ### Phase 4: Content script integration
 - Test ChatGPT page → branch button → extension opens with scraped context
 - Verify `chrome.storage.session` handoff from background.js to app page
 - Verify late context injection (ctx-ready event)
 
-### Phase 5: Export/import + hardening
-- Rewrite `export_import.js` with correct state references (`currentProject().branches`, `state.activeProjectId`)
-- Error handling: network errors, bad API keys, model not found, Ollama not running
-- Token count display
-- Empty state handling (no project, no branch, no messages)
+### Phase 5: Export/import + hardening — DONE
+
+#### New files
+| File | Description |
+|------|-------------|
+| `app/src/export_import.js` | `exportCurrentProject()` serializes active project to JSON Blob and triggers download as `{name}.branchai.json`. `importFromFile(file)` reads JSON via FileReader, validates shape (`name` + `branches`), assigns fresh IDs via `genId()` to avoid collisions, pushes into state, sets as active, persists. |
+
+#### Modified files
+| File | Change |
+|------|--------|
+| `app/src/main.js` | `onImport` handler now calls `renderAll()` after successful import, with try/catch showing errors inline in output pane. Added `setCurrentModelId` import + calls wherever `currentModelId` changes (populateModels, syncBranchProvider, onModelChange). |
+| `app/src/providers/ollama.js` | `listModels()`, `chat()`, `chatStream()` wrap `fetch` in try/catch — network failures throw `"Ollama not running at {url}"`. HTTP 404 → `"Model not found"`. |
+| `app/src/providers/openai.js` | Same try/catch pattern in `listModels()`, `chat()`, `chatStream()` — network failures throw `"Cannot reach OpenAI API"`. 401 → `"Invalid OpenAI API key"` / `"Invalid API key"`, 429 → `"Rate limited — try again shortly"`, 404 → `"Model not found"`. |
+| `app/src/providers/anthropic.js` | `chat()` and `chatStream()` wrap fetch in try/catch — network errors → `"Cannot reach Anthropic API"`, 401 → `"Invalid Anthropic API key"`, 429 → `"Rate limited — try again shortly"`, 400 → parsed error detail from response body. |
+| `app/src/utils.js` | Added `TOKEN_LIMITS` map (`claude-` → 200k, `gpt-4` → 128k, `gpt-3.5` → 16385, default 8192) and exported `getTokenLimit(modelId)`. |
+| `app/src/ui.js` | Added `_currentModelId` state + `setCurrentModelId()` export. `updateTokenInfo()` now shows `~{tokens} / {limit} tokens` with color classes: `token-ok` (<50%), `token-warn` (50–80%), `token-danger` (>80%). `renderBranches()` shows `"No branches yet"` when empty. `renderAll()` shows `"Connect a provider in Settings"` hint when modelSel is `--`. |
+| `app/app.css` | Added `.token-ok` (green), `.token-warn` (amber), `.token-danger` (red) classes. |
 
 ---
 
@@ -137,4 +164,4 @@ import('/app/src/state.js').then(m => {
 
 ## Resume Point
 
-**Next up:** Run Phase 2 manual tests (see above). Once passing, commit Phase 2 and start Phase 3 — cloud providers (OpenAI + Anthropic).
+**Next up:** Phase 4 testing — verify content script integration on ChatGPT pages (branch button injection, context handoff via `chrome.storage.session`, late injection via `branchai:ctx-ready`).

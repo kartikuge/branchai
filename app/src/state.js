@@ -142,7 +142,7 @@ export function updateSettings(partial) {
 
 // --- boot ---
 
-export async function loadInitial(injectedTranscript, anchorIdx = null) {
+export async function loadInitial(injectedTranscript, anchorIdx = null, title = null) {
   // 1) load saved state
   const saved = await loadFromStorage();
   if (saved) {
@@ -156,7 +156,7 @@ export async function loadInitial(injectedTranscript, anchorIdx = null) {
       ? Math.max(0, Math.min(anchorIdx, injectedTranscript.length - 1))
       : injectedTranscript.length - 1;
     const seed = injectedTranscript.slice(0, cut + 1);
-    newProject('New Project', seed, 'Branched from Chat');
+    newProject(title || 'Branched Chat', seed, 'Branched from Chat');
   }
 
   // 3) if nothing exists, create a scratch project with an empty branch

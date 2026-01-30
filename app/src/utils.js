@@ -9,3 +9,18 @@ export function estimateTokens(messages){
   const chars = (messages||[]).reduce((a,m)=>a+(m.content?.length||0),0);
   return Math.ceil(chars/4);
 }
+
+const TOKEN_LIMITS = [
+  ['claude-', 200000],
+  ['gpt-4', 128000],
+  ['gpt-3.5', 16385],
+];
+const DEFAULT_TOKEN_LIMIT = 8192;
+
+export function getTokenLimit(modelId) {
+  if (!modelId) return DEFAULT_TOKEN_LIMIT;
+  for (const [prefix, limit] of TOKEN_LIMITS) {
+    if (modelId.startsWith(prefix)) return limit;
+  }
+  return DEFAULT_TOKEN_LIMIT;
+}

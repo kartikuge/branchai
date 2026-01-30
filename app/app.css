@@ -42,3 +42,14 @@ hr { border:none; border-top:1px solid #eee; margin:12px 0; }
 .modal-body label { font-size:12px; font-weight:600; margin-top:4px; }
 .modal-body input { width:100%; box-sizing:border-box; }
 .modal-footer { margin-top:16px; display:flex; justify-content:flex-end; }
+.setting-row { display:flex; gap:6px; align-items:center; }
+.setting-row input { flex:1; }
+.btn-sm { padding:4px 8px; font-size:12px; }
+.test-result { font-size:12px; white-space:nowrap; }
+.test-ok { color:#0a7; }
+.test-fail { color:#c33; }
+
+/* Token count thresholds */
+.token-ok { color:#0a7; }
+.token-warn { color:#c90; }
+.token-danger { color:#c33; }
