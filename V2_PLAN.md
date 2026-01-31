@@ -441,99 +441,46 @@ Grid view (cards) is unchanged and still available via the toggle.
 
 ---
 
-## Planned: Auto-Summarization for Branches
+## Auto-Summarization for Branches — DONE
 
-### Goal
+### New file: `app/src/summarize.js`
 
-Auto-generate concise one-line summaries for branches that populate the "Summary" column in the branches table. The summary is derived from the branch's conversation messages and branch-point context.
+Single exported function: `summarizeBranch(provider, model, branch)`.
+
+Takes the branch's conversation (up to 20 messages), sends a summarization prompt to `provider.chat()` (non-streaming, max 60 tokens, temperature 0.3), returns a one-line summary string. Includes branch-point context if `branchedFromMsg` is set. Returns `''` on failure.
 
 ### Data model changes (`state.js`)
 
-Add two fields to each branch object (backfilled via `normalizeState`):
+Added two fields to each branch object (backfilled via `normalizeState`):
 
 | Field | Type | Purpose |
 |-------|------|---------|
 | `b.summary` | `string` | AI-generated summary, separate from user-editable `b.description` |
-| `b.summaryMsgCount` | `number` | Message count when summary was last generated; used to skip re-summarization of unchanged branches |
-
-`normalizeState()` backfills: `if (!b.summary) b.summary = '';` and `if (b.summaryMsgCount == null) b.summaryMsgCount = 0;`
-
-### New module: `app/src/summarize.js`
-
-Single exported function:
-
-```js
-export async function summarizeBranch(provider, model, branch) → Promise<string>
-```
-
-**Logic:**
-1. If branch has 0 messages, return `''`
-2. Take up to the first ~20 messages to keep token usage low
-3. Build a prompt:
-   - System: `"Summarize this conversation in one concise sentence (under 80 chars). Return ONLY the summary, no quotes."`
-   - Include truncated messages as context (role + content pairs)
-   - If `branch.branchedFromMsg != null`, prepend context: `"This conversation was branched from message N of a parent thread."`
-4. Call `provider.chat(messages, { model, max_tokens: 60, temperature: 0.3 })` — uses the non-streaming `chat()` method
-5. Return the trimmed result; on error, return `''`
+| `b.summaryMsgCount` | `number` | Message count when summary was last generated; skips re-summarization of unchanged branches |
 
 ### Trigger points
 
 **Primary — after chat send** (`main.js`, inside `sendMessage()` after assistant response is saved):
+- Fire-and-forget: if `b.messages.length !== b.summaryMsgCount`, calls `summarizeBranch()` in the background, updates `b.summary` and `b.summaryMsgCount` on success, persists.
 
-```js
-// Fire-and-forget, non-blocking
-if (b.messages.length !== b.summaryMsgCount) {
-  summarizeBranch(provider, model, b).then(summary => {
-    if (summary) {
-      b.summary = summary;
-      b.summaryMsgCount = b.messages.length;
-      persist();
-    }
-  });
-}
-```
+**Secondary — lazy fill on PROJECT screen entry** (`main.js`, `lazySummarizeBranches()`):
+- On `onScreenChange(PROJECT)`, iterates all branches in the current project. Any branch with messages but stale/missing summary gets a background `summarizeBranch()` call. On success, updates fields, persists, and re-renders.
 
-This runs in the background after each LLM response without blocking the UI or the main chat flow.
+### Display
 
-**Secondary — lazy fill on PROJECT screen entry** (`main.js`, inside `onScreenChange` for PROJECT screen):
-
-For each branch where `b.messages.length > 0 && b.summaryMsgCount !== b.messages.length`, queue a background summarization call. This handles imported branches and data that existed before the feature was added.
-
-### Display (`ui.js`)
-
-Update the branches table `col-desc` cell to prefer summary over description:
-
-```js
-const summaryText = b.summary || b.description || '';
-```
+- **Table list view**: Summary column shows `b.summary || b.description || ''`
+- **Grid card view**: Card description shows `b.summary || b.description || ''`
+- **Expandable summaries**: In table view, a small inline chevron (`>`) appears before truncated summary text. Clicking it toggles `.expanded` on the row — the chevron rotates 90 degrees and the summary text wraps within its column bounds (no overflow into other columns).
 
 ### Export/import (`export_import.js`)
 
-Include `summary` and `summaryMsgCount` in export. On import, default to `''` / `0` if missing.
-
-### Cost / performance notes
-
-- Uses `chat()` (non-streaming) — one short API call per summarization, no streaming overhead
-- Max 60 output tokens keeps cost minimal (~$0.001 or less per call)
-- `summaryMsgCount` guard prevents re-summarizing unchanged branches
-- Fire-and-forget pattern ensures UI is never blocked by summarization
-- Only first ~20 messages sent as context to avoid large token input costs
-- Lazy fill on PROJECT screen batches existing branches but could be rate-limited if needed
-
-### Implementation order
-
-1. `state.js` — add `summary` / `summaryMsgCount` to `normalizeState()`
-2. New `app/src/summarize.js` — the summarization function
-3. `main.js` — hook after `sendMessage()` completion + lazy fill on PROJECT screen entry
-4. `ui.js` — display `b.summary || b.description` in the Summary column
-5. `export_import.js` — include new fields in export/import
+`summary` and `summaryMsgCount` included in both export and import, defaulting to `''` / `0` if missing.
 
 ---
 
 ## Resume Point
 
-**All phases complete. Tabular list view and bug fixes done.** Next steps:
-- Implement auto-summarization feature (see plan above)
+**All phases complete. Auto-summarization, tabular list view, and bug fixes done.** Next steps:
 - Live-test content script integration on ChatGPT (Phase 4 verification)
 - Polish: empty state illustrations, loading skeletons, keyboard shortcuts
 - Remove legacy `branch-host/` and `branch-chat-ext/` directories

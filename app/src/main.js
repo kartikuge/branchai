@@ -4,6 +4,7 @@ import { renderAll, setModelStatus, getSettingsValues, setCurrentModelId, setCal
 import { getProvider, listProviders } from './providers/registry.js';
 import { SCREENS, navigateTo, onScreenChange, getCurrentScreen } from './router.js';
 import { now } from './utils.js';
+import { summarizeBranch } from './summarize.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -236,12 +237,46 @@ async function sendMessage() {
     await persist();
     renderAll();
     setModelStatus(`${provider.name}: connected`, 'ok');
+
+    // Fire-and-forget branch summary update
+    if (b.messages.length !== b.summaryMsgCount) {
+      summarizeBranch(provider, model, b).then(summary => {
+        if (summary) {
+          b.summary = summary;
+          b.summaryMsgCount = b.messages.length;
+          persist();
+        }
+      });
+    }
   } catch (e) {
     console.error('[BranchAI] run error', e);
     updateStreamingContent('Error: ' + (e?.message || e));
     setModelStatus(`${provider.name}: error`, 'bad');
   } finally {
     if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+// --- lazy branch summarization ---
+
+function lazySummarizeBranches() {
+  if (!activeProvider) return;
+  const p = currentProject();
+  if (!p) return;
+  const model = currentModelId || state.settings.defaultModel;
+  if (!model) return;
+
+  for (const b of p.branches) {
+    if (b.messages.length > 0 && b.summaryMsgCount !== b.messages.length) {
+      summarizeBranch(activeProvider, model, b).then(summary => {
+        if (summary) {
+          b.summary = summary;
+          b.summaryMsgCount = b.messages.length;
+          persist();
+          renderAll();
+        }
+      });
+    }
   }
 }
 
@@ -347,6 +382,9 @@ onScreenChange((screen) => {
     repopulateModelsFromCache();
     syncBranchProvider();
     wireChatInput();
+  } else if (screen === SCREENS.PROJECT) {
+    // Lazy-fill missing branch summaries
+    lazySummarizeBranches();
   }
 });
 

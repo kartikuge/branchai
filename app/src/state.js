@@ -44,6 +44,8 @@ function normalizeState() {
       if (!b.emoji) b.emoji = pickDefaultEmoji();
       if (!b.updatedAt) b.updatedAt = b.createdAt || now();
       if (b.branchedFromMsg === undefined) b.branchedFromMsg = null;
+      if (!b.summary) b.summary = '';
+      if (b.summaryMsgCount == null) b.summaryMsgCount = 0;
     }
   }
 

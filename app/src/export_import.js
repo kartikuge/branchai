@@ -19,6 +19,8 @@ export function exportCurrentProject() {
       createdAt: b.createdAt,
       updatedAt: b.updatedAt,
       branchedFromMsg: b.branchedFromMsg ?? null,
+      summary: b.summary || '',
+      summaryMsgCount: b.summaryMsgCount || 0,
       messages: b.messages || [],
     })),
   };
@@ -70,6 +72,8 @@ export async function importFromFile(file) {
       createdAt: b.createdAt || ts,
       updatedAt: b.updatedAt || ts,
       branchedFromMsg: b.branchedFromMsg ?? null,
+      summary: b.summary || '',
+      summaryMsgCount: b.summaryMsgCount || 0,
       messages: Array.isArray(b.messages) ? b.messages.map(m => ({ ...m })) : [],
     })),
   };

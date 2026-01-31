@@ -416,10 +416,38 @@ header {
 .table-row .col-desc {
   font-size: 13px;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.col-desc .desc-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  flex: 1;
+}
+
+/* Expand toggle — subtle inline chevron */
+.expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+.expand-toggle svg { width: 11px; height: 11px; }
+.expand-toggle:hover { color: var(--text-muted); }
+.table-row.expanded .expand-toggle { transform: rotate(90deg); }
+
+/* Expanded state — text wraps within its column */
+.table-row.expanded .col-desc .desc-text {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .table-row .col-count,

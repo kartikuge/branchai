@@ -288,7 +288,7 @@ function renderBranchesScreen() {
           <button class="card-delete" data-del-branch="${escapeHtml(b.id)}" title="Delete branch">&times;</button>
           <div class="card-emoji">${escapeHtml(b.emoji || '')}</div>
           <div class="card-name">${escapeHtml(b.title)}</div>
-          <div class="card-desc">${escapeHtml(b.description || '')}</div>
+          <div class="card-desc">${escapeHtml(b.summary || b.description || '')}</div>
           <div class="card-meta">
             <span>${ICONS.message} ${msgCount} msg${msgCount !== 1 ? 's' : ''}</span>
             <span>${ICONS.clock} ${timeAgo(b.updatedAt)}</span>
@@ -309,13 +309,17 @@ function renderBranchesScreen() {
     for (const b of branches) {
       const msgCount = (b.messages || []).length;
       const isActive = b.id === state.activeBranchId;
+      const summaryText = b.summary || b.description || '';
       const origin = b.branchedFromMsg != null
         ? `${ICONS.gitFork} from msg ${b.branchedFromMsg + 1}`
         : '<span class="muted">root</span>';
+      const expandBtn = summaryText
+        ? `<span class="expand-toggle" data-expand="${escapeHtml(b.id)}">${ICONS.chevronRight}</span>`
+        : '';
       html += `
       <div class="table-row${isActive ? ' row-active' : ''}" data-branch="${escapeHtml(b.id)}">
         <span class="col-name"><span class="row-emoji">${escapeHtml(b.emoji || '')}</span> ${escapeHtml(b.title)}</span>
-        <span class="col-desc">${escapeHtml(b.description || '')}</span>
+        <span class="col-desc">${expandBtn}<span class="desc-text">${escapeHtml(summaryText)}</span></span>
         <span class="col-count">${ICONS.message} ${msgCount}</span>
         <span class="col-origin">${origin}</span>
         <span class="col-updated">${timeAgo(b.updatedAt)}</span>
@@ -327,11 +331,20 @@ function renderBranchesScreen() {
 
   el.innerHTML = html;
 
+  // Wire expand toggles
+  el.querySelectorAll('[data-expand]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const row = btn.closest('.table-row');
+      if (row) row.classList.toggle('expanded');
+    });
+  });
+
   // Wire clicks
   el.querySelectorAll('[data-branch]').forEach(node => {
     if (node.classList.contains('row-delete') || node.classList.contains('card-delete')) return;
     node.addEventListener('click', (e) => {
-      if (e.target.closest('.row-delete') || e.target.closest('.card-delete')) return;
+      if (e.target.closest('.row-delete') || e.target.closest('.card-delete') || e.target.closest('.expand-toggle')) return;
       state.activeBranchId = node.dataset.branch;
       persist();
       navigateTo(SCREENS.CHAT);
