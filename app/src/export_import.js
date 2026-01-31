@@ -1,6 +1,6 @@
 // export_import.js — project export/import
 import { state, currentProject, persist } from './state.js';
-import { genId } from './utils.js';
+import { genId, pickDefaultEmoji, now } from './utils.js';
 
 export function exportCurrentProject() {
   const p = currentProject();
@@ -8,10 +8,19 @@ export function exportCurrentProject() {
 
   const data = {
     name: p.name,
+    description: p.description || '',
+    emoji: p.emoji || '',
     createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
     branches: (p.branches || []).map(b => ({
       title: b.title,
+      description: b.description || '',
+      emoji: b.emoji || '',
       createdAt: b.createdAt,
+      updatedAt: b.updatedAt,
+      branchedFromMsg: b.branchedFromMsg ?? null,
+      summary: b.summary || '',
+      summaryMsgCount: b.summaryMsgCount || 0,
       messages: b.messages || [],
     })),
   };
@@ -47,14 +56,24 @@ export async function importFromFile(file) {
   }
 
   const pid = genId('prj');
+  const ts = now();
   const proj = {
     id: pid,
     name: data.name,
-    createdAt: data.createdAt || Date.now(),
+    description: data.description || '',
+    emoji: data.emoji || pickDefaultEmoji(),
+    createdAt: data.createdAt || ts,
+    updatedAt: data.updatedAt || ts,
     branches: data.branches.map(b => ({
       id: genId('br'),
       title: b.title || 'Imported Branch',
-      createdAt: b.createdAt || Date.now(),
+      description: b.description || '',
+      emoji: b.emoji || pickDefaultEmoji(),
+      createdAt: b.createdAt || ts,
+      updatedAt: b.updatedAt || ts,
+      branchedFromMsg: b.branchedFromMsg ?? null,
+      summary: b.summary || '',
+      summaryMsgCount: b.summaryMsgCount || 0,
       messages: Array.isArray(b.messages) ? b.messages.map(m => ({ ...m })) : [],
     })),
   };
