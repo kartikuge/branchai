@@ -6,49 +6,66 @@ export class OllamaProvider extends BaseProvider {
   get name() { return 'Ollama (local)'; }
 
   get baseUrl() {
-    return (this.config.ollamaUrl || 'http://localhost:11434').replace(/\/+$/, '');
+    return (this.config.url || 'http://localhost:11434').replace(/\/+$/, '');
   }
 
   async listModels() {
-    const res = await fetch(`${this.baseUrl}/api/tags`);
+    let res;
+    try {
+      res = await fetch(`${this.baseUrl}/api/tags`);
+    } catch {
+      throw new Error(`Ollama not running at ${this.baseUrl}`);
+    }
     if (!res.ok) throw new Error(`Ollama unreachable (${res.status})`);
     const data = await res.json();
     return (data.models || []).map(m => ({ id: m.name, name: m.name }));
   }
 
   async chat(messages, options = {}) {
-    const res = await fetch(`${this.baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: options.model || this.config.defaultModel || 'llama3.2',
-        messages,
-        stream: false,
-        options: {
-          temperature: options.temperature ?? 0.7,
-          num_predict: options.max_tokens ?? 2048,
-        },
-      }),
-    });
+    let res;
+    try {
+      res = await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: options.model || this.config.defaultModel || 'llama3.2',
+          messages,
+          stream: false,
+          options: {
+            temperature: options.temperature ?? 0.7,
+            num_predict: options.max_tokens ?? 2048,
+          },
+        }),
+      });
+    } catch {
+      throw new Error(`Ollama not running at ${this.baseUrl}`);
+    }
+    if (res.status === 404) throw new Error('Model not found');
     if (!res.ok) throw new Error(`Ollama error (${res.status})`);
     const data = await res.json();
     return data.message?.content || '';
   }
 
   async chatStream(messages, options = {}) {
-    const res = await fetch(`${this.baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: options.model || this.config.defaultModel || 'llama3.2',
-        messages,
-        stream: true,
-        options: {
-          temperature: options.temperature ?? 0.7,
-          num_predict: options.max_tokens ?? 2048,
-        },
-      }),
-    });
+    let res;
+    try {
+      res = await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: options.model || this.config.defaultModel || 'llama3.2',
+          messages,
+          stream: true,
+          options: {
+            temperature: options.temperature ?? 0.7,
+            num_predict: options.max_tokens ?? 2048,
+          },
+        }),
+      });
+    } catch {
+      throw new Error(`Ollama not running at ${this.baseUrl}`);
+    }
+    if (res.status === 404) throw new Error('Model not found');
     if (!res.ok) throw new Error(`Ollama error (${res.status})`);
 
     const reader = res.body.getReader();

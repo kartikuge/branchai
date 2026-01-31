@@ -1,13 +1,26 @@
-// main.js — provider-based orchestration
-import { loadInitial, persist, state, currentBranch, updateSettings } from './state.js';
-import { bindStaticControls, renderAll, setModelStatus, openSettingsModal, getSettingsValues } from './ui.js';
+// main.js — provider-based orchestration (screen-based UI)
+import { loadInitial, persist, state, currentBranch, currentProject, updateSettings } from './state.js';
+import { renderAll, setModelStatus, getSettingsValues, setCurrentModelId, setCallbacks, appendStreamingBubble, updateStreamingContent } from './ui.js';
 import { getProvider, listProviders } from './providers/registry.js';
+import { SCREENS, navigateTo, onScreenChange, getCurrentScreen } from './router.js';
 import { now } from './utils.js';
+import { summarizeBranch } from './summarize.js';
 
 const $ = (id) => document.getElementById(id);
 
+// --- theme ---
+
+function applyTheme() {
+  const dark = !!state.settings.darkMode;
+  document.documentElement.classList.toggle('dark', dark);
+  document.documentElement.classList.toggle('light', !dark);
+}
+
+// --- provider state ---
+
 let activeProvider = null;
 let currentModelId = null;
+let _cachedModels = [];
 
 // --- injected context (from content script via background) ---
 
@@ -16,9 +29,9 @@ async function getInjectedContext() {
     const result = await chrome.storage.session.get('branchai_pending');
     if (result.branchai_pending) {
       await chrome.storage.session.remove('branchai_pending');
-      const { transcript, anchorIndex } = result.branchai_pending;
+      const { transcript, anchorIndex, title } = result.branchai_pending;
       if (Array.isArray(transcript) && transcript.length) {
-        return { ctx: transcript, anchor: anchorIndex ?? transcript.length - 1 };
+        return { ctx: transcript, anchor: anchorIndex ?? transcript.length - 1, title: title || null };
       }
     }
   } catch { /* not in extension context */ }
@@ -60,7 +73,8 @@ async function activateProvider(providerId) {
   const test = await activeProvider.testConnection();
   if (!test.ok) {
     setModelStatus(`${activeProvider.name}: ${test.error}`, 'bad');
-    $('modelSel').innerHTML = '<option>--</option>';
+    const sel = $('modelSel');
+    if (sel) sel.innerHTML = '<option>--</option>';
     return;
   }
 
@@ -68,30 +82,85 @@ async function activateProvider(providerId) {
   await populateModels();
 }
 
-async function populateModels() {
+async function populateModels(selectModelId) {
   const sel = $('modelSel');
-  if (!sel || !activeProvider) return;
+  if (!activeProvider) return;
+
   try {
-    const models = await activeProvider.listModels();
-    sel.innerHTML = '';
-    if (!models.length) {
-      sel.innerHTML = '<option>no models found</option>';
-      return;
-    }
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.name;
-      sel.appendChild(opt);
-    }
-    // Restore previously selected model or use first
-    if (state.settings.defaultModel && models.some(m => m.id === state.settings.defaultModel)) {
-      sel.value = state.settings.defaultModel;
-    }
-    currentModelId = sel.value;
+    _cachedModels = await activeProvider.listModels();
   } catch (e) {
-    sel.innerHTML = '<option>error loading models</option>';
+    _cachedModels = [];
+    if (sel) sel.innerHTML = '<option>error loading models</option>';
     setModelStatus(`model list failed: ${e.message}`, 'bad');
+    return;
+  }
+
+  if (!sel) return;
+  sel.innerHTML = '';
+  if (!_cachedModels.length) {
+    sel.innerHTML = '<option>no models found</option>';
+    return;
+  }
+  for (const m of _cachedModels) {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name;
+    sel.appendChild(opt);
+  }
+  // Use explicit model if provided, then branch model, then global default
+  const target = selectModelId || state.settings.defaultModel;
+  if (target && _cachedModels.some(m => m.id === target)) {
+    sel.value = target;
+  }
+  currentModelId = sel.value;
+  setCurrentModelId(currentModelId);
+}
+
+function repopulateModelsFromCache() {
+  const sel = $('modelSel');
+  if (!sel || !_cachedModels.length) return;
+  sel.innerHTML = '';
+  for (const m of _cachedModels) {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name;
+    sel.appendChild(opt);
+  }
+  const target = currentModelId || state.settings.defaultModel;
+  if (target && _cachedModels.some(m => m.id === target)) {
+    sel.value = target;
+  }
+  currentModelId = sel.value;
+  setCurrentModelId(currentModelId);
+}
+
+/**
+ * Restore the branch's saved provider/model into the header dropdowns.
+ */
+async function syncBranchProvider() {
+  const b = currentBranch();
+  const branchProvider = b?.provider || state.settings.activeProvider;
+  const branchModel = b?.model || null;
+
+  if (branchProvider !== activeProvider?.id) {
+    const provSel = $('providerSel');
+    if (provSel) provSel.value = branchProvider;
+    await activateProvider(branchProvider);
+    if (branchModel) {
+      const sel = $('modelSel');
+      if (sel && [...sel.options].some(o => o.value === branchModel)) {
+        sel.value = branchModel;
+        currentModelId = branchModel;
+        setCurrentModelId(currentModelId);
+      }
+    }
+  } else if (branchModel) {
+    const sel = $('modelSel');
+    if (sel && [...sel.options].some(o => o.value === branchModel)) {
+      sel.value = branchModel;
+      currentModelId = branchModel;
+      setCurrentModelId(currentModelId);
+    }
   }
 }
 
@@ -104,7 +173,6 @@ function buildMessages(userText) {
   const msgs = [];
   msgs.push({ role: 'system', content: 'You are a helpful assistant. Continue the conversation naturally.' });
 
-  // Send ALL messages (no cap)
   for (const m of b.messages) {
     msgs.push({ role: m.role, content: m.content });
   }
@@ -122,9 +190,10 @@ async function sendMessage() {
   if (!b) return alert('Create/select a branch first.');
   if (!activeProvider) return alert('No provider connected. Check settings.');
 
-  const userText = $('extra').value;
-  $('extra').value = '';
-  $('out').textContent = '';
+  const input = $('chatInput');
+  const userText = input?.value || '';
+  if (input) input.value = '';
+  autoResizeTextarea(input);
 
   if (userText?.trim()) {
     b.messages.push({ role: 'user', content: userText.trim(), ts: now() });
@@ -132,38 +201,108 @@ async function sendMessage() {
     renderAll();
   }
 
-  const model = $('modelSel').value;
+  // Use branch provider/model if set, falling back to current UI selection
+  const providerId = b.provider || activeProvider.id;
+  let provider = activeProvider;
+  if (providerId !== activeProvider.id) {
+    const config = state.settings[providerId] || {};
+    provider = getProvider(providerId, config);
+  }
+  const model = b.model || $('modelSel')?.value;
   if (!model || model === '--' || model === 'no models found') {
     return alert('No model selected.');
   }
 
-  setModelStatus(`${activeProvider.name}: generating...`);
-  $('runBtn').disabled = true;
+  setModelStatus(`${provider.name}: generating...`);
+  const sendBtn = $('sendBtn');
+  if (sendBtn) sendBtn.disabled = true;
 
   try {
+    appendStreamingBubble();
     const messages = buildMessages(null);
-    const output = await activeProvider.chatStream(messages, {
+    const output = await provider.chatStream(messages, {
       model,
-      temperature: 0.7,
       max_tokens: 2048,
-      onToken: (txt) => { $('out').textContent = txt; },
+      onToken: (txt) => { updateStreamingContent(txt); },
     });
 
-    const assistantText = $('out').textContent || output || '(no content)';
+    const streamEl = $('streaming-content');
+    const assistantText = streamEl?.textContent || output || '(no content)';
     b.messages.push({ role: 'assistant', content: assistantText, ts: now() });
     b.model = model;
-    b.provider = state.settings.activeProvider;
+    b.provider = providerId;
     b.updatedAt = now();
+    const p = currentProject();
+    if (p) p.updatedAt = now();
     await persist();
     renderAll();
-    setModelStatus(`${activeProvider.name}: connected`, 'ok');
+    setModelStatus(`${provider.name}: connected`, 'ok');
+
+    // Fire-and-forget branch summary update
+    if (b.messages.length !== b.summaryMsgCount) {
+      summarizeBranch(provider, model, b).then(summary => {
+        if (summary) {
+          b.summary = summary;
+          b.summaryMsgCount = b.messages.length;
+          persist();
+        }
+      });
+    }
   } catch (e) {
     console.error('[BranchAI] run error', e);
-    $('out').textContent = 'Error: ' + (e?.message || e);
-    setModelStatus(`${activeProvider.name}: error`, 'bad');
+    updateStreamingContent('Error: ' + (e?.message || e));
+    setModelStatus(`${provider.name}: error`, 'bad');
   } finally {
-    $('runBtn').disabled = false;
+    if (sendBtn) sendBtn.disabled = false;
   }
+}
+
+// --- lazy branch summarization ---
+
+function lazySummarizeBranches() {
+  if (!activeProvider) return;
+  const p = currentProject();
+  if (!p) return;
+  const model = currentModelId || state.settings.defaultModel;
+  if (!model) return;
+
+  for (const b of p.branches) {
+    if (b.messages.length > 0 && b.summaryMsgCount !== b.messages.length) {
+      summarizeBranch(activeProvider, model, b).then(summary => {
+        if (summary) {
+          b.summary = summary;
+          b.summaryMsgCount = b.messages.length;
+          persist();
+          renderAll();
+        }
+      });
+    }
+  }
+}
+
+// --- chat input wiring ---
+
+function wireChatInput() {
+  const input = $('chatInput');
+  const sendBtn = $('sendBtn');
+  if (!input) return;
+
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  input.oninput = () => autoResizeTextarea(input);
+
+  if (sendBtn) sendBtn.onclick = sendMessage;
+}
+
+function autoResizeTextarea(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
 }
 
 // --- settings ---
@@ -173,57 +312,126 @@ function handleSettingsSave() {
   updateSettings(vals);
   const modal = $('settingsModal');
   if (modal) modal.style.display = 'none';
-  // Re-activate provider with new settings
   activateProvider(state.settings.activeProvider);
 }
 
-// --- boot ---
+// --- callbacks for ui.js ---
 
-bindStaticControls({
-  onRun: sendMessage,
-  onCopy: async () => {
-    const text = $('out').textContent || '';
-    if (text) await navigator.clipboard.writeText(text);
+setCallbacks({
+  onProviderChange: async (e) => {
+    const id = e.target.value;
+    await activateProvider(id);
+    const b = currentBranch();
+    if (b) {
+      b.provider = id;
+      b.model = $('modelSel')?.value || null;
+      persist();
+    }
   },
-  onProviderChange: (e) => activateProvider(e.target.value),
   onModelChange: (e) => {
     currentModelId = e.target.value;
+    setCurrentModelId(currentModelId);
     state.settings.defaultModel = currentModelId;
-    persist();
+    const b = currentBranch();
+    if (b) {
+      b.model = currentModelId;
+      persist();
+    }
   },
-  onImport: async (e) => {
-    const mod = await import('./export_import.js');
-    await mod.importFromFile(e.target.files?.[0]);
-    e.target.value = '';
+  onSettingsSave: handleSettingsSave,
+  onDarkModeChange: (isDark) => {
+    state.settings.darkMode = isDark;
+    updateSettings({ darkMode: isDark });
+    applyTheme();
+    renderAll();
+    if (getCurrentScreen() === SCREENS.CHAT) {
+      populateProviders();
+      repopulateModelsFromCache();
+      wireChatInput();
+    }
   },
   onExport: async () => {
     const mod = await import('./export_import.js');
     mod.exportCurrentProject();
   },
-  onSettingsOpen: () => {
-    openSettingsModal();
-    // Wire save button after modal is created
-    const saveBtn = $('settSaveBtn');
-    if (saveBtn) saveBtn.onclick = handleSettingsSave;
-  },
+  onImport: null, // handled via fileInput below
 });
+
+// File input handler (for import)
+const fileInput = $('fileInput');
+if (fileInput) {
+  fileInput.onchange = async (e) => {
+    const mod = await import('./export_import.js');
+    try {
+      await mod.importFromFile(e.target.files?.[0]);
+      renderAll();
+    } catch (err) {
+      alert('Import error: ' + (err?.message || err));
+    }
+    e.target.value = '';
+  };
+}
+
+// --- screen change listener ---
+
+onScreenChange((screen) => {
+  renderAll();
+  if (screen === SCREENS.CHAT) {
+    // Re-populate provider/model selects on chat entry
+    populateProviders();
+    repopulateModelsFromCache();
+    syncBranchProvider();
+    wireChatInput();
+  } else if (screen === SCREENS.PROJECT) {
+    // Lazy-fill missing branch summaries
+    lazySummarizeBranches();
+  }
+});
+
+// --- boot ---
 
 (async function boot() {
   // 1) Load state + any injected context
   const inj = await getInjectedContext();
-  await loadInitial(inj?.ctx, inj?.anchor);
-  renderAll();
+  await loadInitial(inj?.ctx, inj?.anchor, inj?.title);
+  applyTheme();
 
-  // 2) Populate provider dropdown and connect
-  populateProviders();
+  // 2) Eagerly activate provider (cached internally)
   await activateProvider(state.settings.activeProvider);
 
-  // 3) Listen for late context injection
+  // 3) Navigate to the right screen
+  if (inj?.ctx?.length) {
+    // navigateTo fires onScreenChange → renderAll + chat wiring
+    navigateTo(SCREENS.CHAT);
+  } else {
+    // HOME is the default _current, so navigateTo won't fire the callback.
+    // Render manually for the initial paint.
+    renderAll();
+  }
+
+  // 4) Listen for late context injection
   window.addEventListener('branchai:ctx-ready', async () => {
     const late = await getInjectedContext();
     if (late?.ctx?.length) {
-      await loadInitial(late.ctx, late.anchor);
-      renderAll();
+      await loadInitial(late.ctx, late.anchor, late.title);
+      if (getCurrentScreen() === SCREENS.CHAT) {
+        // Already on chat — navigateTo would be a no-op, refresh manually
+        renderAll();
+        populateProviders();
+        repopulateModelsFromCache();
+        wireChatInput();
+      } else {
+        navigateTo(SCREENS.CHAT);
+      }
     }
   });
+
+  // 5) Listen for CTX_READY message from background (tab reuse path)
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg?.type === 'CTX_READY') {
+        window.dispatchEvent(new Event('branchai:ctx-ready'));
+      }
+    });
+  } catch { /* not in extension context */ }
 })();
