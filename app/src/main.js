@@ -1,20 +1,25 @@
-// main.js — provider-based orchestration
-import { loadInitial, persist, state, currentBranch, updateSettings } from './state.js';
-import { bindStaticControls, renderAll, setModelStatus, openSettingsModal, getSettingsValues, setCurrentModelId } from './ui.js';
+// main.js — provider-based orchestration (screen-based UI)
+import { loadInitial, persist, state, currentBranch, currentProject, updateSettings } from './state.js';
+import { renderAll, setModelStatus, getSettingsValues, setCurrentModelId, setCallbacks, appendStreamingBubble, updateStreamingContent } from './ui.js';
 import { getProvider, listProviders } from './providers/registry.js';
+import { SCREENS, navigateTo, onScreenChange, getCurrentScreen } from './router.js';
 import { now } from './utils.js';
 
 const $ = (id) => document.getElementById(id);
 
+// --- theme ---
+
 function applyTheme() {
   const dark = !!state.settings.darkMode;
   document.documentElement.classList.toggle('dark', dark);
-  const btn = $('darkModeToggle');
-  if (btn) btn.textContent = dark ? 'Light' : 'Dark';
+  document.documentElement.classList.toggle('light', !dark);
 }
+
+// --- provider state ---
 
 let activeProvider = null;
 let currentModelId = null;
+let _cachedModels = [];
 
 // --- injected context (from content script via background) ---
 
@@ -67,7 +72,8 @@ async function activateProvider(providerId) {
   const test = await activeProvider.testConnection();
   if (!test.ok) {
     setModelStatus(`${activeProvider.name}: ${test.error}`, 'bad');
-    $('modelSel').innerHTML = '<option>--</option>';
+    const sel = $('modelSel');
+    if (sel) sel.innerHTML = '<option>--</option>';
     return;
   }
 
@@ -77,47 +83,68 @@ async function activateProvider(providerId) {
 
 async function populateModels(selectModelId) {
   const sel = $('modelSel');
-  if (!sel || !activeProvider) return;
+  if (!activeProvider) return;
+
   try {
-    const models = await activeProvider.listModels();
-    sel.innerHTML = '';
-    if (!models.length) {
-      sel.innerHTML = '<option>no models found</option>';
-      return;
-    }
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.name;
-      sel.appendChild(opt);
-    }
-    // Use explicit model if provided, then branch model, then global default
-    const target = selectModelId || state.settings.defaultModel;
-    if (target && models.some(m => m.id === target)) {
-      sel.value = target;
-    }
-    currentModelId = sel.value;
-    setCurrentModelId(currentModelId);
+    _cachedModels = await activeProvider.listModels();
   } catch (e) {
-    sel.innerHTML = '<option>error loading models</option>';
+    _cachedModels = [];
+    if (sel) sel.innerHTML = '<option>error loading models</option>';
     setModelStatus(`model list failed: ${e.message}`, 'bad');
+    return;
   }
+
+  if (!sel) return;
+  sel.innerHTML = '';
+  if (!_cachedModels.length) {
+    sel.innerHTML = '<option>no models found</option>';
+    return;
+  }
+  for (const m of _cachedModels) {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name;
+    sel.appendChild(opt);
+  }
+  // Use explicit model if provided, then branch model, then global default
+  const target = selectModelId || state.settings.defaultModel;
+  if (target && _cachedModels.some(m => m.id === target)) {
+    sel.value = target;
+  }
+  currentModelId = sel.value;
+  setCurrentModelId(currentModelId);
+}
+
+function repopulateModelsFromCache() {
+  const sel = $('modelSel');
+  if (!sel || !_cachedModels.length) return;
+  sel.innerHTML = '';
+  for (const m of _cachedModels) {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name;
+    sel.appendChild(opt);
+  }
+  const target = currentModelId || state.settings.defaultModel;
+  if (target && _cachedModels.some(m => m.id === target)) {
+    sel.value = target;
+  }
+  currentModelId = sel.value;
+  setCurrentModelId(currentModelId);
 }
 
 /**
  * Restore the branch's saved provider/model into the header dropdowns.
- * Called after renderAll (branch switch).
  */
 async function syncBranchProvider() {
   const b = currentBranch();
   const branchProvider = b?.provider || state.settings.activeProvider;
   const branchModel = b?.model || null;
 
-  // If branch uses a different provider than what's active, switch
   if (branchProvider !== activeProvider?.id) {
-    $('providerSel').value = branchProvider;
+    const provSel = $('providerSel');
+    if (provSel) provSel.value = branchProvider;
     await activateProvider(branchProvider);
-    // activateProvider calls populateModels; now set the model
     if (branchModel) {
       const sel = $('modelSel');
       if (sel && [...sel.options].some(o => o.value === branchModel)) {
@@ -127,7 +154,6 @@ async function syncBranchProvider() {
       }
     }
   } else if (branchModel) {
-    // Same provider, just select the model
     const sel = $('modelSel');
     if (sel && [...sel.options].some(o => o.value === branchModel)) {
       sel.value = branchModel;
@@ -146,7 +172,6 @@ function buildMessages(userText) {
   const msgs = [];
   msgs.push({ role: 'system', content: 'You are a helpful assistant. Continue the conversation naturally.' });
 
-  // Send ALL messages (no cap)
   for (const m of b.messages) {
     msgs.push({ role: m.role, content: m.content });
   }
@@ -164,9 +189,10 @@ async function sendMessage() {
   if (!b) return alert('Create/select a branch first.');
   if (!activeProvider) return alert('No provider connected. Check settings.');
 
-  const userText = $('extra').value;
-  $('extra').value = '';
-  $('out').textContent = '';
+  const input = $('chatInput');
+  const userText = input?.value || '';
+  if (input) input.value = '';
+  autoResizeTextarea(input);
 
   if (userText?.trim()) {
     b.messages.push({ role: 'user', content: userText.trim(), ts: now() });
@@ -181,37 +207,67 @@ async function sendMessage() {
     const config = state.settings[providerId] || {};
     provider = getProvider(providerId, config);
   }
-  const model = b.model || $('modelSel').value;
+  const model = b.model || $('modelSel')?.value;
   if (!model || model === '--' || model === 'no models found') {
     return alert('No model selected.');
   }
 
   setModelStatus(`${provider.name}: generating...`);
-  $('runBtn').disabled = true;
+  const sendBtn = $('sendBtn');
+  if (sendBtn) sendBtn.disabled = true;
 
   try {
+    appendStreamingBubble();
     const messages = buildMessages(null);
     const output = await provider.chatStream(messages, {
       model,
       max_tokens: 2048,
-      onToken: (txt) => { $('out').textContent = txt; },
+      onToken: (txt) => { updateStreamingContent(txt); },
     });
 
-    const assistantText = $('out').textContent || output || '(no content)';
+    const streamEl = $('streaming-content');
+    const assistantText = streamEl?.textContent || output || '(no content)';
     b.messages.push({ role: 'assistant', content: assistantText, ts: now() });
     b.model = model;
     b.provider = providerId;
     b.updatedAt = now();
+    const p = currentProject();
+    if (p) p.updatedAt = now();
     await persist();
     renderAll();
     setModelStatus(`${provider.name}: connected`, 'ok');
   } catch (e) {
     console.error('[BranchAI] run error', e);
-    $('out').textContent = 'Error: ' + (e?.message || e);
+    updateStreamingContent('Error: ' + (e?.message || e));
     setModelStatus(`${provider.name}: error`, 'bad');
   } finally {
-    $('runBtn').disabled = false;
+    if (sendBtn) sendBtn.disabled = false;
   }
+}
+
+// --- chat input wiring ---
+
+function wireChatInput() {
+  const input = $('chatInput');
+  const sendBtn = $('sendBtn');
+  if (!input) return;
+
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  input.oninput = () => autoResizeTextarea(input);
+
+  if (sendBtn) sendBtn.onclick = sendMessage;
+}
+
+function autoResizeTextarea(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
 }
 
 // --- settings ---
@@ -221,26 +277,19 @@ function handleSettingsSave() {
   updateSettings(vals);
   const modal = $('settingsModal');
   if (modal) modal.style.display = 'none';
-  // Re-activate provider with new settings
   activateProvider(state.settings.activeProvider);
 }
 
-// --- boot ---
+// --- callbacks for ui.js ---
 
-bindStaticControls({
-  onRun: sendMessage,
-  onCopy: async () => {
-    const text = $('out').textContent || '';
-    if (text) await navigator.clipboard.writeText(text);
-  },
+setCallbacks({
   onProviderChange: async (e) => {
     const id = e.target.value;
     await activateProvider(id);
-    // Save to current branch
     const b = currentBranch();
     if (b) {
       b.provider = id;
-      b.model = $('modelSel').value || null;
+      b.model = $('modelSel')?.value || null;
       persist();
     }
   },
@@ -248,66 +297,98 @@ bindStaticControls({
     currentModelId = e.target.value;
     setCurrentModelId(currentModelId);
     state.settings.defaultModel = currentModelId;
-    // Save to current branch
     const b = currentBranch();
     if (b) {
       b.model = currentModelId;
       persist();
     }
   },
-  onImport: async (e) => {
-    const mod = await import('./export_import.js');
-    try {
-      await mod.importFromFile(e.target.files?.[0]);
-      renderAll();
-    } catch (err) {
-      $('out').textContent = 'Import error: ' + (err?.message || err);
+  onSettingsSave: handleSettingsSave,
+  onDarkModeChange: (isDark) => {
+    state.settings.darkMode = isDark;
+    updateSettings({ darkMode: isDark });
+    applyTheme();
+    renderAll();
+    if (getCurrentScreen() === SCREENS.CHAT) {
+      populateProviders();
+      repopulateModelsFromCache();
+      wireChatInput();
     }
-    e.target.value = '';
   },
   onExport: async () => {
     const mod = await import('./export_import.js');
     mod.exportCurrentProject();
   },
-  onBranchSwitch: () => syncBranchProvider(),
-  onSettingsOpen: () => {
-    openSettingsModal();
-    // Wire save button after modal is created
-    const saveBtn = $('settSaveBtn');
-    if (saveBtn) saveBtn.onclick = handleSettingsSave;
-  },
+  onImport: null, // handled via fileInput below
 });
 
-const darkModeBtn = $('darkModeToggle');
-if (darkModeBtn) {
-  darkModeBtn.onclick = () => {
-    state.settings.darkMode = !state.settings.darkMode;
-    updateSettings({ darkMode: state.settings.darkMode });
-    applyTheme();
+// File input handler (for import)
+const fileInput = $('fileInput');
+if (fileInput) {
+  fileInput.onchange = async (e) => {
+    const mod = await import('./export_import.js');
+    try {
+      await mod.importFromFile(e.target.files?.[0]);
+      renderAll();
+    } catch (err) {
+      alert('Import error: ' + (err?.message || err));
+    }
+    e.target.value = '';
   };
 }
+
+// --- screen change listener ---
+
+onScreenChange((screen) => {
+  renderAll();
+  if (screen === SCREENS.CHAT) {
+    // Re-populate provider/model selects on chat entry
+    populateProviders();
+    repopulateModelsFromCache();
+    syncBranchProvider();
+    wireChatInput();
+  }
+});
+
+// --- boot ---
 
 (async function boot() {
   // 1) Load state + any injected context
   const inj = await getInjectedContext();
   await loadInitial(inj?.ctx, inj?.anchor, inj?.title);
   applyTheme();
-  renderAll();
 
-  // 2) Populate provider dropdown and connect
-  populateProviders();
+  // 2) Eagerly activate provider (cached internally)
   await activateProvider(state.settings.activeProvider);
 
-  // 3) Listen for late context injection (from branchai:ctx-ready custom event)
+  // 3) Navigate to the right screen
+  if (inj?.ctx?.length) {
+    // navigateTo fires onScreenChange → renderAll + chat wiring
+    navigateTo(SCREENS.CHAT);
+  } else {
+    // HOME is the default _current, so navigateTo won't fire the callback.
+    // Render manually for the initial paint.
+    renderAll();
+  }
+
+  // 4) Listen for late context injection
   window.addEventListener('branchai:ctx-ready', async () => {
     const late = await getInjectedContext();
     if (late?.ctx?.length) {
       await loadInitial(late.ctx, late.anchor, late.title);
-      renderAll();
+      if (getCurrentScreen() === SCREENS.CHAT) {
+        // Already on chat — navigateTo would be a no-op, refresh manually
+        renderAll();
+        populateProviders();
+        repopulateModelsFromCache();
+        wireChatInput();
+      } else {
+        navigateTo(SCREENS.CHAT);
+      }
     }
   });
 
-  // 4) Listen for CTX_READY message from background (tab reuse path)
+  // 5) Listen for CTX_READY message from background (tab reuse path)
   try {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg?.type === 'CTX_READY') {

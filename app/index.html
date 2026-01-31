@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html class="dark">
 <head>
   <meta charset="utf-8" />
   <title>BranchAI — Branching Workspace</title>
@@ -7,65 +7,32 @@
   <link rel="stylesheet" href="./app.css" />
 </head>
 <body>
-  <header>
-    <strong>BranchAI</strong>
-    <span id="modelStatus" class="pill">starting...</span>
-    <span class="pill">
-      provider:
-      <select id="providerSel"></select>
-    </span>
-    <span class="pill">
-      model:
-      <select id="modelSel">
-        <option>loading...</option>
-      </select>
-    </span>
-    <div style="margin-left:auto" class="row">
-      <button type="button" class="btn" id="darkModeToggle" title="Toggle dark mode">Dark</button>
-      <button class="btn" id="settingsBtn">Settings</button>
-      <button class="btn" id="exportBtn">Export</button>
-      <button class="btn" id="importBtn">Import</button>
-      <input type="file" id="fileInput" style="display:none" accept=".json,.branchai.json" />
+  <header id="appHeader"></header>
+
+  <main id="screen-home" class="screen active">
+    <div class="screen-inner">
+      <div id="home-content"></div>
     </div>
-  </header>
+  </main>
 
-  <div class="wrap">
-    <section class="pane" id="leftPane">
-      <div class="toolbar">
-        <h3>Projects</h3>
-        <button class="btn" id="newProjectBtn">New</button>
-      </div>
-      <div id="projects"></div>
-      <hr/>
-      <div class="toolbar">
-        <h3>Branches</h3>
-        <button class="btn" id="newBranchBtn">New Branch</button>
-      </div>
-      <div id="branches"></div>
-    </section>
+  <main id="screen-project" class="screen">
+    <div class="screen-inner">
+      <div id="project-content"></div>
+    </div>
+  </main>
 
-    <section class="pane">
-      <div class="toolbar">
-        <div class="row">
-          <input type="text" id="projectName" placeholder="Project name" />
-          <span id="tokenInfo" class="badge muted">~0 tokens</span>
-        </div>
+  <main id="screen-chat" class="screen">
+    <div class="chat-container">
+      <div class="chat-subtitle" id="chatSubtitle"></div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-bar">
+        <textarea id="chatInput" placeholder="Type to continue this branch..." rows="1"></textarea>
+        <button class="send-btn" id="sendBtn" title="Send message"></button>
       </div>
-      <div id="transcript"></div>
-    </section>
+    </div>
+  </main>
 
-    <section class="pane">
-      <h3>Chat</h3>
-      <p class="muted">Message for this branch:</p>
-      <textarea id="extra" placeholder="Type your message..."></textarea>
-      <div class="row" style="margin-top:8px">
-        <button class="btn primary" id="runBtn">Run</button>
-        <button class="btn" id="copyBtn">Copy latest</button>
-      </div>
-      <h3>Assistant</h3>
-      <div id="out" class="code"></div>
-    </section>
-  </div>
+  <input type="file" id="fileInput" style="display:none" accept=".json,.branchai.json" />
 
   <script type="module" src="./src/main.js"></script>
 </body>

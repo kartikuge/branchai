@@ -24,3 +24,26 @@ export function getTokenLimit(modelId) {
   }
   return DEFAULT_TOKEN_LIMIT;
 }
+
+const DEFAULT_EMOJIS = ['\uD83D\uDE80', '\uD83D\uDCA1', '\uD83C\uDFA8', '\u26A1', '\uD83D\uDCCA', '\uD83D\uDD27', '\uD83C\uDF1F', '\uD83D\uDCDD'];
+let _emojiIdx = 0;
+export function pickDefaultEmoji() {
+  const emoji = DEFAULT_EMOJIS[_emojiIdx % DEFAULT_EMOJIS.length];
+  _emojiIdx++;
+  return emoji;
+}
+
+export function timeAgo(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}

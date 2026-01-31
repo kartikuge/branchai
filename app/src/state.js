@@ -1,15 +1,16 @@
 // state.js — chrome.storage.local backed state with provider settings
 
-import { genId, now } from './utils.js';
+import { genId, now, pickDefaultEmoji } from './utils.js';
 
 export const state = {
   projects: [],
   activeProjectId: null,
   activeBranchId: null,
+  viewMode: 'list',
   settings: {
     activeProvider: 'ollama',
     defaultModel: null,
-    darkMode: false,
+    darkMode: true,
     ollama: { url: 'http://localhost:11434' },
     openai: { apiKey: '' },
     anthropic: { apiKey: '' },
@@ -20,20 +21,32 @@ export const state = {
 
 function normalizeState() {
   if (!Array.isArray(state.projects)) state.projects = [];
+  if (!state.viewMode) state.viewMode = 'list';
   if (!state.settings) {
     state.settings = {
       activeProvider: 'ollama',
       defaultModel: null,
-      darkMode: false,
+      darkMode: true,
       ollama: { url: 'http://localhost:11434' },
       openai: { apiKey: '' },
       anthropic: { apiKey: '' },
     };
   }
-  if (typeof state.settings.darkMode !== 'boolean') state.settings.darkMode = false;
+  if (typeof state.settings.darkMode !== 'boolean') state.settings.darkMode = true;
+
   for (const p of state.projects) {
     if (!Array.isArray(p.branches)) p.branches = [];
+    if (!p.description) p.description = '';
+    if (!p.emoji) p.emoji = pickDefaultEmoji();
+    if (!p.updatedAt) p.updatedAt = p.createdAt || now();
+    for (const b of p.branches) {
+      if (!b.description) b.description = '';
+      if (!b.emoji) b.emoji = pickDefaultEmoji();
+      if (!b.updatedAt) b.updatedAt = b.createdAt || now();
+      if (b.branchedFromMsg === undefined) b.branchedFromMsg = null;
+    }
   }
+
   const p = state.projects.find(x => x.id === state.activeProjectId) || state.projects[0] || null;
   if (p) {
     state.activeProjectId = p.id;
@@ -83,16 +96,29 @@ async function loadFromStorage() {
 
 // --- mutations ---
 
-export function newProject(name = 'New Project', seedMessages = null, firstBranchTitle = 'Branched from Chat') {
+export function newProject(name = 'New Project', seedMessages = null, firstBranchTitle = 'Branched from Chat', { description = '', emoji = '' } = {}) {
   const pid = genId('prj');
-  const proj = { id: pid, name, createdAt: now(), branches: [] };
+  const ts = now();
+  const proj = {
+    id: pid,
+    name,
+    description,
+    emoji: emoji || pickDefaultEmoji(),
+    createdAt: ts,
+    updatedAt: ts,
+    branches: [],
+  };
 
   if (Array.isArray(seedMessages) && seedMessages.length) {
     const bid = genId('br');
     proj.branches.push({
       id: bid,
       title: firstBranchTitle,
-      createdAt: now(),
+      description: '',
+      emoji: pickDefaultEmoji(),
+      createdAt: ts,
+      updatedAt: ts,
+      branchedFromMsg: null,
       messages: seedMessages.map(m => ({ ...m })),
     });
     state.activeBranchId = bid;
@@ -105,16 +131,22 @@ export function newProject(name = 'New Project', seedMessages = null, firstBranc
   return proj;
 }
 
-export function newBranch(title = 'New Branch', seedMessages = []) {
+export function newBranch(title = 'New Branch', seedMessages = [], branchedFromMsg = null, { description = '', emoji = '' } = {}) {
   const p = currentProject();
   if (!p) return null;
+  const ts = now();
   const br = {
     id: genId('br'),
     title,
-    createdAt: now(),
+    description,
+    emoji: emoji || pickDefaultEmoji(),
+    createdAt: ts,
+    updatedAt: ts,
+    branchedFromMsg,
     messages: Array.isArray(seedMessages) ? seedMessages.map(m => ({ ...m })) : [],
   };
   p.branches = [br, ...(p.branches || [])];
+  p.updatedAt = ts;
   state.activeBranchId = br.id;
   normalizeState();
   persist();
