@@ -118,7 +118,14 @@ async function populateModels(selectModelId) {
 
 function repopulateModelsFromCache() {
   const sel = $('modelSel');
-  if (!sel || !_cachedModels.length) return;
+  if (!sel) return;
+
+  // If cache is empty, show appropriate message
+  if (!_cachedModels.length) {
+    sel.innerHTML = '<option>no models available</option>';
+    return;
+  }
+
   sel.innerHTML = '';
   for (const m of _cachedModels) {
     const opt = document.createElement('option');
@@ -146,20 +153,25 @@ async function syncBranchProvider() {
     const provSel = $('providerSel');
     if (provSel) provSel.value = branchProvider;
     await activateProvider(branchProvider);
-    if (branchModel) {
-      const sel = $('modelSel');
-      if (sel && [...sel.options].some(o => o.value === branchModel)) {
+  }
+
+  // Try to select the branch's saved model if it exists in the current provider
+  if (branchModel) {
+    const sel = $('modelSel');
+    if (sel) {
+      const modelExists = [...sel.options].some(o => o.value === branchModel);
+      if (modelExists) {
         sel.value = branchModel;
         currentModelId = branchModel;
         setCurrentModelId(currentModelId);
+      } else {
+        // Model doesn't exist in this provider - use first available and update branch
+        if (sel.options.length > 0 && sel.options[0].value !== 'no models available') {
+          currentModelId = sel.value;
+          setCurrentModelId(currentModelId);
+          if (b) b.model = currentModelId;
+        }
       }
-    }
-  } else if (branchModel) {
-    const sel = $('modelSel');
-    if (sel && [...sel.options].some(o => o.value === branchModel)) {
-      sel.value = branchModel;
-      currentModelId = branchModel;
-      setCurrentModelId(currentModelId);
     }
   }
 }
@@ -208,9 +220,20 @@ async function sendMessage() {
     const config = state.settings[providerId] || {};
     provider = getProvider(providerId, config);
   }
-  const model = b.model || $('modelSel')?.value;
-  if (!model || model === '--' || model === 'no models found') {
-    return alert('No model selected.');
+
+  // Get model - prefer branch model if it exists in the current provider's models
+  let model = $('modelSel')?.value; // Start with UI selection
+  if (b.model && _cachedModels.some(m => m.id === b.model)) {
+    // Branch model exists in current provider, use it
+    model = b.model;
+  } else if (b.model) {
+    // Branch has a model that doesn't exist in current provider - use UI selection
+    // and update branch to prevent future mismatches
+    b.model = model;
+  }
+
+  if (!model || model === '--' || model === 'no models found' || model === 'loading...') {
+    return alert('No model selected. Please select a model from the dropdown.');
   }
 
   setModelStatus(`${provider.name}: generating...`);
@@ -324,7 +347,14 @@ setCallbacks({
     const b = currentBranch();
     if (b) {
       b.provider = id;
-      b.model = $('modelSel')?.value || null;
+      // Always use the newly selected model from dropdown after provider switch
+      // This ensures we don't use an old model name from a different provider
+      const newModel = $('modelSel')?.value;
+      if (newModel && newModel !== '--' && newModel !== 'loading...' && newModel !== 'no models found') {
+        b.model = newModel;
+      } else {
+        b.model = null; // Clear invalid model
+      }
       persist();
     }
   },
@@ -339,14 +369,19 @@ setCallbacks({
     }
   },
   onSettingsSave: handleSettingsSave,
-  onDarkModeChange: (isDark) => {
+  onDarkModeChange: async (isDark) => {
     state.settings.darkMode = isDark;
     updateSettings({ darkMode: isDark });
     applyTheme();
     renderAll();
     if (getCurrentScreen() === SCREENS.CHAT) {
       populateProviders();
-      repopulateModelsFromCache();
+      if (!_cachedModels.length && activeProvider) {
+        await populateModels();
+      } else {
+        repopulateModelsFromCache();
+      }
+      await syncBranchProvider();
       wireChatInput();
     }
   },
@@ -374,13 +409,20 @@ if (fileInput) {
 
 // --- screen change listener ---
 
-onScreenChange((screen) => {
+onScreenChange(async (screen) => {
   renderAll();
   if (screen === SCREENS.CHAT) {
     // Re-populate provider/model selects on chat entry
     populateProviders();
-    repopulateModelsFromCache();
-    syncBranchProvider();
+
+    // If cache is empty (provider wasn't activated or failed), fetch models now
+    if (!_cachedModels.length && activeProvider) {
+      await populateModels();
+    } else {
+      repopulateModelsFromCache();
+    }
+
+    await syncBranchProvider();
     wireChatInput();
   } else if (screen === SCREENS.PROJECT) {
     // Lazy-fill missing branch summaries
@@ -418,7 +460,12 @@ onScreenChange((screen) => {
         // Already on chat — navigateTo would be a no-op, refresh manually
         renderAll();
         populateProviders();
-        repopulateModelsFromCache();
+        if (!_cachedModels.length && activeProvider) {
+          await populateModels();
+        } else {
+          repopulateModelsFromCache();
+        }
+        await syncBranchProvider();
         wireChatInput();
       } else {
         navigateTo(SCREENS.CHAT);

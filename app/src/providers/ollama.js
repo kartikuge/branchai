@@ -41,6 +41,7 @@ export class OllamaProvider extends BaseProvider {
       throw new Error(`Ollama not running at ${this.baseUrl}`);
     }
     if (res.status === 404) throw new Error('Model not found');
+    if (res.status === 403) throw new Error('Ollama rejected request (403). Try setting OLLAMA_ORIGINS=* when starting Ollama');
     if (!res.ok) throw new Error(`Ollama error (${res.status})`);
     const data = await res.json();
     return data.message?.content || '';
@@ -66,6 +67,7 @@ export class OllamaProvider extends BaseProvider {
       throw new Error(`Ollama not running at ${this.baseUrl}`);
     }
     if (res.status === 404) throw new Error('Model not found');
+    if (res.status === 403) throw new Error('Ollama rejected request (403). Try setting OLLAMA_ORIGINS=* when starting Ollama');
     if (!res.ok) throw new Error(`Ollama error (${res.status})`);
 
     const reader = res.body.getReader();

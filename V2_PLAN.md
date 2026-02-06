@@ -478,9 +478,123 @@ Added two fields to each branch object (backfilled via `normalizeState`):
 
 ---
 
+## Post-Phase 6.2: Provider Switching Bug Fixes — DONE
+
+### Bugs fixed
+
+| Bug | Root Cause | Fix |
+|-----|------------|-----|
+| Model not found (404) when using OpenAI after switching from Ollama | Branch's `model` field retained old provider's model name (e.g., 'llama3.2') which doesn't exist on the new provider | `onProviderChange` now validates model from dropdown; `sendMessage()` validates `b.model` against `_cachedModels` and falls back to UI selection |
+| Model dropdown stuck on "loading..." | `repopulateModelsFromCache()` returned early when `_cachedModels` was empty, leaving the default "loading..." text | Now shows "no models available" when cache is empty; `onScreenChange` triggers fresh `populateModels()` if cache is empty |
+| Ollama 403 error without helpful message | Ollama CORS restrictions cause 403 when `OLLAMA_ORIGINS` not set | Added specific error message: "Ollama rejected request (403). Try setting OLLAMA_ORIGINS=* when starting Ollama" |
+| Branch model mismatch after provider switch | `syncBranchProvider()` didn't validate if saved model exists in current provider | Now validates model against available options; updates branch if model doesn't exist |
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `app/src/main.js` | `onProviderChange` validates new model; `sendMessage()` validates model against cache; `repopulateModelsFromCache()` shows proper message when empty; `syncBranchProvider()` validates model existence; `onScreenChange`/`onDarkModeChange`/late context handlers now fetch models if cache empty |
+| `app/src/providers/ollama.js` | Added 403-specific error message with OLLAMA_ORIGINS hint in both `chat()` and `chatStream()` |
+
+---
+
+## Phase 7: Ollama UX Improvements — PLANNED
+
+### Problem
+
+Ollama requires users to set `OLLAMA_ORIGINS=*` environment variable before it works with Chrome extensions. This causes 403 errors and confusion for users who don't know about this requirement.
+
+### Goal
+
+Make cloud providers (OpenAI, Anthropic) the default experience. Keep Ollama as an "advanced" option with clear setup guidance.
+
+### Sub-phase 7.1: Default Provider Change
+
+**File:** `app/src/state.js`
+
+- Change `activeProvider: 'ollama'` → `activeProvider: 'openai'` in default settings
+- First-time users will see OpenAI selected (prompts them to enter API key)
+
+### Sub-phase 7.2: Settings Modal Reorganization
+
+**File:** `app/src/ui.js` (openSettingsModal function)
+
+Current layout:
+```
+Ollama URL: [input] [Test]
+OpenAI API Key: [input] [Test]
+Anthropic API Key: [input] [Test]
+```
+
+New layout:
+```
+── Cloud Providers ──────────────────────
+OpenAI API Key: [input] [Test]
+Anthropic API Key: [input] [Test]
+
+── Local LLM (Advanced) ─────────────────
+▶ Ollama Setup  [collapsed by default]
+   ⚠️ Requires additional configuration
+   [Ollama URL input] [Test]
+   [Setup Instructions button/link]
+```
+
+Changes:
+- Reorder: OpenAI and Anthropic first (cloud providers)
+- Group Ollama under collapsible "Local LLM (Advanced)" section
+- Add warning icon/text indicating setup required
+- Add "Setup Instructions" button that opens guide
+
+### Sub-phase 7.3: Ollama Setup Instructions
+
+**Option A: In-app modal**
+- Button in settings opens a modal with step-by-step instructions
+- Instructions cover:
+  1. Install Ollama (link to ollama.ai)
+  2. Set OLLAMA_ORIGINS (with copy-paste commands for macOS/Windows/Linux)
+  3. Restart Ollama
+  4. Test connection
+
+**Option B: External link**
+- Link to GitHub wiki or README section
+- Less maintenance of in-app content
+
+**Recommendation:** Option A (in-app modal) — better UX, no external dependencies
+
+### Sub-phase 7.4: CSS Updates
+
+**File:** `app/app.css`
+
+- `.settings-section` — section header styling
+- `.settings-collapsible` — collapsible section with chevron
+- `.settings-warning` — warning text styling (amber/yellow)
+- `.setup-instructions-modal` — modal for Ollama setup guide
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `app/src/state.js` | Change default `activeProvider` from `'ollama'` to `'openai'` |
+| `app/src/ui.js` | Reorganize settings modal, add collapsible Ollama section, add setup instructions modal |
+| `app/app.css` | Add styles for section headers, collapsible, warning text |
+
+---
+
+## Future: Provider API Options — DEFERRED
+
+Adding free-tier cloud providers (Google Gemini, Groq, OpenRouter) requires:
+- Centralized usage tracking per user
+- Daily/monthly rate limiting
+- Backend infrastructure to manage API keys
+
+Deferred until infrastructure is in place.
+
+---
+
 ## Resume Point
 
 **All phases complete. Auto-summarization, tabular list view, and bug fixes done.** Next steps:
+- Phase 7: Ollama UX improvements (in progress)
 - Live-test content script integration on ChatGPT (Phase 4 verification)
 - Polish: empty state illustrations, loading skeletons, keyboard shortcuts
 - Remove legacy `branch-host/` and `branch-chat-ext/` directories
