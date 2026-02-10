@@ -498,7 +498,7 @@ Added two fields to each branch object (backfilled via `normalizeState`):
 
 ---
 
-## Phase 7: Ollama UX Improvements — PLANNED
+## Phase 7: Ollama UX Improvements — DONE
 
 ### Problem
 
@@ -508,23 +508,16 @@ Ollama requires users to set `OLLAMA_ORIGINS=*` environment variable before it w
 
 Make cloud providers (OpenAI, Anthropic) the default experience. Keep Ollama as an "advanced" option with clear setup guidance.
 
-### Sub-phase 7.1: Default Provider Change
+### Sub-phase 7.1: Default Provider Change — DONE
 
 **File:** `app/src/state.js`
 
-- Change `activeProvider: 'ollama'` → `activeProvider: 'openai'` in default settings
-- First-time users will see OpenAI selected (prompts them to enter API key)
+- Changed `activeProvider: 'ollama'` → `activeProvider: 'openai'` in both default state and `normalizeState()` fallback
+- First-time users now see OpenAI selected (prompts them to enter API key)
 
-### Sub-phase 7.2: Settings Modal Reorganization
+### Sub-phase 7.2: Settings Modal Reorganization — DONE
 
 **File:** `app/src/ui.js` (openSettingsModal function)
-
-Current layout:
-```
-Ollama URL: [input] [Test]
-OpenAI API Key: [input] [Test]
-Anthropic API Key: [input] [Test]
-```
 
 New layout:
 ```
@@ -534,49 +527,55 @@ Anthropic API Key: [input] [Test]
 
 ── Local LLM (Advanced) ─────────────────
 ▶ Ollama Setup  [collapsed by default]
-   ⚠️ Requires additional configuration
+   ⚠ Requires additional configuration
    [Ollama URL input] [Test]
-   [Setup Instructions button/link]
+   [Setup Instructions button]
 ```
 
 Changes:
-- Reorder: OpenAI and Anthropic first (cloud providers)
-- Group Ollama under collapsible "Local LLM (Advanced)" section
-- Add warning icon/text indicating setup required
-- Add "Setup Instructions" button that opens guide
+- Reordered: OpenAI and Anthropic first under "Cloud Providers" section header
+- Ollama grouped under collapsible "Local LLM (Advanced)" section with chevron toggle
+- Added amber warning banner indicating additional configuration required
+- Added "Setup Instructions" button that opens in-app guide modal
 
-### Sub-phase 7.3: Ollama Setup Instructions
+### Sub-phase 7.3: Ollama Setup Instructions — DONE
 
-**Option A: In-app modal**
-- Button in settings opens a modal with step-by-step instructions
-- Instructions cover:
-  1. Install Ollama (link to ollama.ai)
-  2. Set OLLAMA_ORIGINS (with copy-paste commands for macOS/Windows/Linux)
-  3. Restart Ollama
-  4. Test connection
+**Implemented:** Option A (in-app modal via `openOllamaGuideModal()`)
 
-**Option B: External link**
-- Link to GitHub wiki or README section
-- Less maintenance of in-app content
+Step-by-step guide covers:
+1. Install Ollama (link to ollama.ai)
+2. Pull a model (`ollama pull llama3.2`)
+3. Set `OLLAMA_ORIGINS=*` with copy-paste commands for macOS/Linux and Windows PowerShell
+4. Test the connection via Settings
 
-**Recommendation:** Option A (in-app modal) — better UX, no external dependencies
+Modal uses numbered step circles (accent purple) with monospace code blocks (`user-select: all` for easy copy).
 
-### Sub-phase 7.4: CSS Updates
+### Sub-phase 7.4: CSS Updates — DONE
 
 **File:** `app/app.css`
 
-- `.settings-section` — section header styling
-- `.settings-collapsible` — collapsible section with chevron
-- `.settings-warning` — warning text styling (amber/yellow)
-- `.setup-instructions-modal` — modal for Ollama setup guide
+| Class | Purpose |
+|-------|---------|
+| `.settings-section-header` | Uppercase 11px section divider with bottom border |
+| `.settings-collapsible` | Full-width button with chevron, toggles `.open` class |
+| `.collapsible-chevron` | Inline SVG chevron that rotates 90deg when `.open` |
+| `.settings-collapsible-body` | Hidden by default (`display: none`), shown as flex column when `.open` |
+| `.settings-warning` | Amber background/border banner with warning icon, 12px text |
+| `.setup-guide-btn` | Inline flex button with external link icon |
+| `.setup-guide-modal` | Modal container for the guide |
+| `.guide-step` | Flex row with numbered circle + body content |
+| `.guide-step-num` | 28px accent purple circle with step number |
+| `.guide-code` | Monospace code block with `user-select: all` for easy copying |
+| `.guide-platform` | Platform-specific command section |
 
-### Files to Modify
+### New file changes
 
 | File | Changes |
 |------|---------|
-| `app/src/state.js` | Change default `activeProvider` from `'ollama'` to `'openai'` |
-| `app/src/ui.js` | Reorganize settings modal, add collapsible Ollama section, add setup instructions modal |
-| `app/app.css` | Add styles for section headers, collapsible, warning text |
+| `app/src/state.js` | Changed default `activeProvider` from `'ollama'` to `'openai'` (2 locations) |
+| `app/src/icons.js` | Added `warning` (alert triangle) and `externalLink` (arrow-out-of-box) icons |
+| `app/src/ui.js` | Reorganized `openSettingsModal()` — cloud providers first, Ollama in collapsible section; added `openOllamaGuideModal()` function |
+| `app/app.css` | Added ~120 lines of styles for settings sections, collapsible, warning, and setup guide modal |
 
 ---
 
@@ -593,8 +592,7 @@ Deferred until infrastructure is in place.
 
 ## Resume Point
 
-**All phases complete. Auto-summarization, tabular list view, and bug fixes done.** Next steps:
-- Phase 7: Ollama UX improvements (in progress)
+**Phases 1–7 complete.** Next steps:
 - Live-test content script integration on ChatGPT (Phase 4 verification)
 - Polish: empty state illustrations, loading skeletons, keyboard shortcuts
 - Remove legacy `branch-host/` and `branch-chat-ext/` directories
