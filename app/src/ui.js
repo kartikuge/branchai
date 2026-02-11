@@ -519,12 +519,7 @@ export function openSettingsModal() {
         <button class="modal-close">&times;</button>
       </div>
       <div class="modal-body">
-        <label>Ollama URL</label>
-        <div class="setting-row">
-          <input type="text" id="settOllamaUrl" value="${escapeHtml(state.settings.ollama.url)}" placeholder="http://localhost:11434" />
-          <button class="btn-sm" id="testOllama">Test</button>
-          <span class="test-result" id="testOllamaResult"></span>
-        </div>
+        <div class="settings-section-header">Cloud Providers</div>
 
         <label>OpenAI API Key</label>
         <div class="setting-row">
@@ -538,6 +533,24 @@ export function openSettingsModal() {
           <input type="password" id="settAnthropicKey" value="${escapeHtml(state.settings.anthropic.apiKey)}" placeholder="sk-ant-..." />
           <button class="btn-sm" id="testAnthropic">Test</button>
           <span class="test-result" id="testAnthropicResult"></span>
+        </div>
+
+        <div class="settings-section-header" style="margin-top: 16px;">Local LLM (Advanced)</div>
+        <button class="settings-collapsible" id="ollamaToggle">
+          <span class="collapsible-chevron">${ICONS.chevronRight}</span>
+          Ollama Setup
+        </button>
+        <div class="settings-collapsible-body" id="ollamaSection">
+          <div class="settings-warning">
+            ${ICONS.warning} Requires additional configuration to work with Chrome extensions.
+          </div>
+          <label>Ollama URL</label>
+          <div class="setting-row">
+            <input type="text" id="settOllamaUrl" value="${escapeHtml(state.settings.ollama.url)}" placeholder="http://localhost:11434" />
+            <button class="btn-sm" id="testOllama">Test</button>
+            <span class="test-result" id="testOllamaResult"></span>
+          </div>
+          <button class="btn-sm setup-guide-btn" id="ollamaGuideBtn">${ICONS.externalLink} Setup Instructions</button>
         </div>
       </div>
       <div class="modal-footer">
@@ -555,6 +568,17 @@ export function openSettingsModal() {
   modal.querySelector('.modal-close').onclick = () => { modal.style.display = 'none'; };
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
 
+  // Ollama collapsible toggle
+  const ollamaToggle = $('ollamaToggle');
+  const ollamaSection = $('ollamaSection');
+  ollamaToggle.onclick = () => {
+    ollamaToggle.classList.toggle('open');
+    ollamaSection.classList.toggle('open');
+  };
+
+  // Ollama setup guide
+  $('ollamaGuideBtn').onclick = () => openOllamaGuideModal();
+
   // Test buttons
   $('testOllama').onclick = () => _testProvider('ollama', { url: $('settOllamaUrl').value.trim() }, $('testOllamaResult'));
   $('testOpenai').onclick = () => _testProvider('openai', { apiKey: $('settOpenaiKey').value.trim() }, $('testOpenaiResult'));
@@ -563,6 +587,73 @@ export function openSettingsModal() {
   // Export / Import
   $('settExportBtn').onclick = () => _callbacks.onExport?.();
   $('settImportBtn').onclick = () => $('fileInput')?.click();
+}
+
+function openOllamaGuideModal() {
+  const existing = $('ollamaGuideModal');
+  if (existing) { existing.style.display = 'flex'; return; }
+
+  const guide = document.createElement('div');
+  guide.id = 'ollamaGuideModal';
+  guide.className = 'modal-overlay';
+  guide.innerHTML = `
+    <div class="modal setup-guide-modal">
+      <div class="modal-header">
+        <h3>Ollama Setup Guide</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="guide-step">
+          <div class="guide-step-num">1</div>
+          <div class="guide-step-body">
+            <div class="guide-step-title">Install Ollama</div>
+            <p>Download and install from <a href="https://ollama.ai" target="_blank" rel="noopener">ollama.ai</a></p>
+          </div>
+        </div>
+
+        <div class="guide-step">
+          <div class="guide-step-num">2</div>
+          <div class="guide-step-body">
+            <div class="guide-step-title">Pull a model</div>
+            <div class="guide-code">ollama pull llama3.2</div>
+          </div>
+        </div>
+
+        <div class="guide-step">
+          <div class="guide-step-num">3</div>
+          <div class="guide-step-body">
+            <div class="guide-step-title">Set OLLAMA_ORIGINS</div>
+            <p>Chrome extensions need cross-origin access. Stop Ollama, then restart with:</p>
+            <div class="guide-platform">
+              <strong>macOS / Linux</strong>
+              <div class="guide-code">OLLAMA_ORIGINS=* ollama serve</div>
+            </div>
+            <div class="guide-platform">
+              <strong>Windows (PowerShell)</strong>
+              <div class="guide-code">$env:OLLAMA_ORIGINS="*"; ollama serve</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-step">
+          <div class="guide-step-num">4</div>
+          <div class="guide-step-body">
+            <div class="guide-step-title">Test the connection</div>
+            <p>Go back to Settings and click "Test" next to the Ollama URL.</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div></div>
+        <button class="btn-primary" id="guideCloseBtn">Got it</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(guide);
+
+  guide.querySelector('.modal-close').onclick = () => { guide.style.display = 'none'; };
+  guide.addEventListener('click', (e) => { if (e.target === guide) guide.style.display = 'none'; });
+  $('guideCloseBtn').onclick = () => { guide.style.display = 'none'; };
 }
 
 async function _testProvider(providerId, config, resultEl) {
