@@ -8,7 +8,7 @@ export const state = {
   activeBranchId: null,
   viewMode: 'list',
   settings: {
-    activeProvider: 'ollama',
+    activeProvider: 'openai',
     defaultModel: null,
     darkMode: true,
     ollama: { url: 'http://localhost:11434' },
@@ -24,7 +24,7 @@ function normalizeState() {
   if (!state.viewMode) state.viewMode = 'list';
   if (!state.settings) {
     state.settings = {
-      activeProvider: 'ollama',
+      activeProvider: 'openai',
       defaultModel: null,
       darkMode: true,
       ollama: { url: 'http://localhost:11434' },
