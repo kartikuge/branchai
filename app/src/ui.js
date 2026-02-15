@@ -525,6 +525,7 @@ export function openSettingsModal() {
         <div class="setting-row">
           <input type="password" id="settOpenaiKey" value="${escapeHtml(state.settings.openai.apiKey)}" placeholder="sk-..." />
           <button class="btn-sm" id="testOpenai">Test</button>
+          ${state.settings.openai.apiKey ? '<button class="btn-delete-key" id="deleteOpenaiKey" title="Remove API key">Delete</button>' : ''}
           <span class="test-result" id="testOpenaiResult"></span>
         </div>
 
@@ -532,6 +533,7 @@ export function openSettingsModal() {
         <div class="setting-row">
           <input type="password" id="settAnthropicKey" value="${escapeHtml(state.settings.anthropic.apiKey)}" placeholder="sk-ant-..." />
           <button class="btn-sm" id="testAnthropic">Test</button>
+          ${state.settings.anthropic.apiKey ? '<button class="btn-delete-key" id="deleteAnthropicKey" title="Remove API key">Delete</button>' : ''}
           <span class="test-result" id="testAnthropicResult"></span>
         </div>
 
@@ -551,6 +553,44 @@ export function openSettingsModal() {
             <span class="test-result" id="testOllamaResult"></span>
           </div>
           <button class="btn-sm setup-guide-btn" id="ollamaGuideBtn">${ICONS.externalLink} Setup Instructions</button>
+        </div>
+
+        <div class="settings-section-header" style="margin-top: 16px;">Security &amp; Privacy</div>
+        <button class="settings-collapsible" id="securityToggle">
+          <span class="collapsible-chevron">${ICONS.chevronRight}</span>
+          How your data is protected
+        </button>
+        <div class="settings-collapsible-body" id="securitySection">
+          <div class="security-info">
+            <div class="security-item">
+              <div class="security-item-icon">${ICONS.lock}</div>
+              <div class="security-item-body">
+                <div class="security-item-title">Encrypted at rest</div>
+                <div class="security-item-desc">API keys are encrypted using AES-256-GCM before being saved to your browser's local storage.</div>
+              </div>
+            </div>
+            <div class="security-item">
+              <div class="security-item-icon">${ICONS.shield}</div>
+              <div class="security-item-body">
+                <div class="security-item-title">Extension sandboxed</div>
+                <div class="security-item-desc">Chrome isolates each extension's storage. Other extensions, websites, and tabs cannot access BranchAI's data.</div>
+              </div>
+            </div>
+            <div class="security-item">
+              <div class="security-item-icon">${ICONS.database}</div>
+              <div class="security-item-body">
+                <div class="security-item-title">Local-only storage</div>
+                <div class="security-item-desc">All data stays on this device. There are no BranchAI servers. Keys are only sent directly to the API provider you configure.</div>
+              </div>
+            </div>
+            <div class="security-item">
+              <div class="security-item-icon">${ICONS.externalLink}</div>
+              <div class="security-item-body">
+                <div class="security-item-title">Open source</div>
+                <div class="security-item-desc">BranchAI's source code is fully open source.</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -576,6 +616,14 @@ export function openSettingsModal() {
     ollamaSection.classList.toggle('open');
   };
 
+  // Security collapsible toggle
+  const securityToggle = $('securityToggle');
+  const securitySection = $('securitySection');
+  securityToggle.onclick = () => {
+    securityToggle.classList.toggle('open');
+    securitySection.classList.toggle('open');
+  };
+
   // Ollama setup guide
   $('ollamaGuideBtn').onclick = () => openOllamaGuideModal();
 
@@ -583,6 +631,34 @@ export function openSettingsModal() {
   $('testOllama').onclick = () => _testProvider('ollama', { url: $('settOllamaUrl').value.trim() }, $('testOllamaResult'));
   $('testOpenai').onclick = () => _testProvider('openai', { apiKey: $('settOpenaiKey').value.trim() }, $('testOpenaiResult'));
   $('testAnthropic').onclick = () => _testProvider('anthropic', { apiKey: $('settAnthropicKey').value.trim() }, $('testAnthropicResult'));
+
+  // Delete API key buttons
+  const deleteOpenaiBtn = $('deleteOpenaiKey');
+  if (deleteOpenaiBtn) {
+    deleteOpenaiBtn.onclick = () => {
+      if (!confirm('Remove your OpenAI API key? This cannot be undone.')) return;
+      $('settOpenaiKey').value = '';
+      state.settings.openai.apiKey = '';
+      _callbacks.onSettingsSave?.();
+      // Re-create modal to reflect changes
+      modal.remove();
+      openSettingsModal();
+    };
+  }
+  const deleteAnthropicBtn = $('deleteAnthropicKey');
+  if (deleteAnthropicBtn) {
+    deleteAnthropicBtn.onclick = () => {
+      if (!confirm('Remove your Anthropic API key? This cannot be undone.')) return;
+      $('settAnthropicKey').value = '';
+      state.settings.anthropic.apiKey = '';
+      _callbacks.onSettingsSave?.();
+      modal.remove();
+      openSettingsModal();
+    };
+  }
+
+  // Save button
+  $('settSaveBtn').onclick = () => _callbacks.onSettingsSave?.();
 
   // Export / Import
   $('settExportBtn').onclick = () => _callbacks.onExport?.();
