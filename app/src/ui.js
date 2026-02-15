@@ -525,6 +525,7 @@ export function openSettingsModal() {
         <div class="setting-row">
           <input type="password" id="settOpenaiKey" value="${escapeHtml(state.settings.openai.apiKey)}" placeholder="sk-..." />
           <button class="btn-sm" id="testOpenai">Test</button>
+          ${state.settings.openai.apiKey ? '<button class="btn-delete-key" id="deleteOpenaiKey" title="Remove API key">Delete</button>' : ''}
           <span class="test-result" id="testOpenaiResult"></span>
         </div>
 
@@ -532,6 +533,7 @@ export function openSettingsModal() {
         <div class="setting-row">
           <input type="password" id="settAnthropicKey" value="${escapeHtml(state.settings.anthropic.apiKey)}" placeholder="sk-ant-..." />
           <button class="btn-sm" id="testAnthropic">Test</button>
+          ${state.settings.anthropic.apiKey ? '<button class="btn-delete-key" id="deleteAnthropicKey" title="Remove API key">Delete</button>' : ''}
           <span class="test-result" id="testAnthropicResult"></span>
         </div>
 
@@ -629,6 +631,34 @@ export function openSettingsModal() {
   $('testOllama').onclick = () => _testProvider('ollama', { url: $('settOllamaUrl').value.trim() }, $('testOllamaResult'));
   $('testOpenai').onclick = () => _testProvider('openai', { apiKey: $('settOpenaiKey').value.trim() }, $('testOpenaiResult'));
   $('testAnthropic').onclick = () => _testProvider('anthropic', { apiKey: $('settAnthropicKey').value.trim() }, $('testAnthropicResult'));
+
+  // Delete API key buttons
+  const deleteOpenaiBtn = $('deleteOpenaiKey');
+  if (deleteOpenaiBtn) {
+    deleteOpenaiBtn.onclick = () => {
+      if (!confirm('Remove your OpenAI API key? This cannot be undone.')) return;
+      $('settOpenaiKey').value = '';
+      state.settings.openai.apiKey = '';
+      _callbacks.onSettingsSave?.();
+      // Re-create modal to reflect changes
+      modal.remove();
+      openSettingsModal();
+    };
+  }
+  const deleteAnthropicBtn = $('deleteAnthropicKey');
+  if (deleteAnthropicBtn) {
+    deleteAnthropicBtn.onclick = () => {
+      if (!confirm('Remove your Anthropic API key? This cannot be undone.')) return;
+      $('settAnthropicKey').value = '';
+      state.settings.anthropic.apiKey = '';
+      _callbacks.onSettingsSave?.();
+      modal.remove();
+      openSettingsModal();
+    };
+  }
+
+  // Save button
+  $('settSaveBtn').onclick = () => _callbacks.onSettingsSave?.();
 
   // Export / Import
   $('settExportBtn').onclick = () => _callbacks.onExport?.();

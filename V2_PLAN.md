@@ -9,7 +9,7 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 ## Current State (Phase 8A Complete)
 
 **Branch:** `v2_refactor`
-**Status:** Phases 1–8A complete. API keys are now encrypted at rest using AES-256-GCM. A Security & Privacy info section has been added to the settings modal. Content script integration (Phase 4) still needs live testing on ChatGPT.
+**Status:** Phases 1–8A complete + Settings UX fixes. API keys are now encrypted at rest using AES-256-GCM. Settings modal has fixed height with scrollable body, delete API key buttons, and Security & Privacy info section. Content script integration (Phase 4) still needs live testing on ChatGPT.
 
 ### File structure
 
@@ -634,6 +634,34 @@ Encryption module using Web Crypto API (AES-256-GCM).
 
 ---
 
+## Post-Phase 8A: Settings Modal UX Fixes — DONE
+
+### Problems
+1. "How your data is protected" dropdown expanded the popup size, pushing action buttons (Export/Import/Save) off-screen
+2. No way for users to explicitly delete stored API keys
+
+### Fixes
+
+**Fixed modal size with scrollable body:**
+- `.modal` now uses `max-height: 85vh`, `display: flex`, `flex-direction: column`
+- `.modal-body` gets `overflow-y: auto` with thin custom scrollbar styling
+- `.modal-header` and `.modal-footer` use `flex-shrink: 0` to always remain visible
+- When both Ollama and Security dropdowns are open, content scrolls smoothly while buttons stay accessible
+
+**Delete API key buttons:**
+- Added red "Delete" button next to each API key's Test button (only shown when a key exists)
+- Clicking shows a confirmation dialog, then clears the key from state and `chrome.storage.local`
+- Modal re-creates itself to reflect the updated state (Delete button disappears after removal)
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `app/app.css` | `.modal` → added `max-height`, flex layout; `.modal-body` → `overflow-y: auto` with scrollbar styling; `.modal-header`/`.modal-footer` → `flex-shrink: 0`; new `.btn-delete-key` style (red outline, fills red on hover) |
+| `app/src/ui.js` | Added conditional "Delete" buttons for OpenAI/Anthropic keys; wired delete handlers with confirm + state clear + modal refresh; wired save button inside `openSettingsModal()` for post-delete re-creation |
+
+---
+
 ## Phase 8B: IndexedDB Migration — PLANNED (not yet implemented)
 
 ### Why IndexedDB
@@ -690,7 +718,7 @@ Deferred until infrastructure is in place.
 
 ## Resume Point
 
-**Phases 1–8A complete.** Next steps:
+**Phases 1–8A complete + Settings UX fixes done.** Next steps:
 - **Phase 8B**: IndexedDB migration — move conversations out of `chrome.storage.local` for scalability
 - Live-test content script integration on ChatGPT (Phase 4 verification)
 - Polish: empty state illustrations, loading skeletons, keyboard shortcuts

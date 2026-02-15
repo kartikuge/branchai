@@ -666,6 +666,9 @@ header {
   padding: 24px;
   min-width: 400px;
   max-width: 520px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--modal-shadow);
   color: var(--text);
 }
@@ -674,6 +677,7 @@ header {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+  flex-shrink: 0;
 }
 .modal-header h3 { margin: 0; font-size: 18px; color: var(--text); }
 .modal-close {
@@ -694,7 +698,16 @@ header {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-alt) transparent;
 }
+.modal-body::-webkit-scrollbar { width: 6px; }
+.modal-body::-webkit-scrollbar-track { background: transparent; }
+.modal-body::-webkit-scrollbar-thumb { background: var(--border-alt); border-radius: 3px; }
+.modal-body::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 .modal-body label {
   font-size: 12px;
   font-weight: 600;
@@ -722,6 +735,7 @@ header {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 .modal-footer-left {
   display: flex;
@@ -746,6 +760,18 @@ header {
 .test-result { font-size: 12px; white-space: nowrap; }
 .test-ok { color: var(--success); }
 .test-fail { color: var(--error); }
+.btn-delete-key {
+  padding: 5px 8px;
+  font-size: 11px;
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--error);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-delete-key:hover { background: var(--error); color: #fff; }
 
 /* Settings section headers */
 .settings-section-header {
