@@ -969,6 +969,51 @@ header {
 .emoji-option:hover { border-color: var(--border-alt); }
 .emoji-option.selected { border-color: var(--accent); background: var(--accent-soft); }
 
+/* Security info section */
+.security-info {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 0;
+}
+
+.security-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.security-item-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+  margin-top: 1px;
+}
+
+.security-item-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.security-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.security-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.security-item-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

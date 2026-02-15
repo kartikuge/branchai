@@ -1,6 +1,7 @@
 // state.js — chrome.storage.local backed state with provider settings
 
 import { genId, now, pickDefaultEmoji } from './utils.js';
+import { encrypt, decrypt, isEncrypted } from './crypto.js';
 
 export const state = {
   projects: [],
@@ -76,9 +77,29 @@ export function currentBranch() {
 
 const STORAGE_KEY = 'branchai_state_v2';
 
+async function encryptApiKeys(settings) {
+  if (settings?.openai?.apiKey && typeof settings.openai.apiKey === 'string' && settings.openai.apiKey !== '') {
+    settings.openai.apiKey = await encrypt(settings.openai.apiKey);
+  }
+  if (settings?.anthropic?.apiKey && typeof settings.anthropic.apiKey === 'string' && settings.anthropic.apiKey !== '') {
+    settings.anthropic.apiKey = await encrypt(settings.anthropic.apiKey);
+  }
+}
+
+async function decryptApiKeys(settings) {
+  if (isEncrypted(settings?.openai?.apiKey)) {
+    settings.openai.apiKey = await decrypt(settings.openai.apiKey);
+  }
+  if (isEncrypted(settings?.anthropic?.apiKey)) {
+    settings.anthropic.apiKey = await decrypt(settings.anthropic.apiKey);
+  }
+}
+
 export async function persist() {
   try {
-    await chrome.storage.local.set({ [STORAGE_KEY]: JSON.parse(JSON.stringify(state)) });
+    const clone = JSON.parse(JSON.stringify(state));
+    await encryptApiKeys(clone.settings);
+    await chrome.storage.local.set({ [STORAGE_KEY]: clone });
   } catch {
     // Fallback for development outside extension context
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -88,7 +109,9 @@ export async function persist() {
 async function loadFromStorage() {
   try {
     const result = await chrome.storage.local.get(STORAGE_KEY);
-    return result[STORAGE_KEY] || null;
+    const loaded = result[STORAGE_KEY] || null;
+    if (loaded) await decryptApiKeys(loaded.settings);
+    return loaded;
   } catch {
     // Fallback
     const raw = localStorage.getItem(STORAGE_KEY);

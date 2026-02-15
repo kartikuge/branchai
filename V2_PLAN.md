@@ -6,10 +6,10 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 
 ---
 
-## Current State (Phase 6 Complete)
+## Current State (Phase 8A Complete)
 
 **Branch:** `v2_refactor`
-**Status:** Phases 1–6 complete. The UI has been fully reworked from a 3-pane layout to a 3-screen navigation flow (Home → Project → Chat). Content script integration (Phase 4) still needs live testing on ChatGPT.
+**Status:** Phases 1–8A complete. API keys are now encrypted at rest using AES-256-GCM. A Security & Privacy info section has been added to the settings modal. Content script integration (Phase 4) still needs live testing on ChatGPT.
 
 ### File structure
 
@@ -26,6 +26,7 @@ branchai/
       utils.js                          # Helpers (genId, escapeHtml, pickDefaultEmoji, timeAgo, etc.)
       router.js                         # Minimal screen-based view manager (NEW in Phase 6)
       icons.js                          # Inline SVG icon strings (NEW in Phase 6)
+      crypto.js                         # AES-256-GCM encryption for API keys at rest (NEW in Phase 8A)
       export_import.js                  # Project export/import with extended fields
       providers/
         base.js                         # Abstract provider interface
@@ -579,6 +580,103 @@ Modal uses numbered step circles (accent purple) with monospace code blocks (`us
 
 ---
 
+## Phase 8A: API Key Encryption + Security Info — DONE
+
+### Problem
+
+API keys for OpenAI and Anthropic were stored as plaintext strings in `chrome.storage.local`. While Chrome's per-extension sandbox prevents other extensions from reading this data, the keys were plaintext on disk (LevelDB files in the Chrome profile). No security documentation existed for users.
+
+### Goal
+
+Encrypt API keys at rest using AES-256-GCM + add a Security & Privacy info section in the settings modal.
+
+### New file: `app/src/crypto.js` (~83 lines)
+
+Encryption module using Web Crypto API (AES-256-GCM).
+
+**Key derivation strategy — deterministic key + session cache:**
+1. On first run, generates 16 random bytes (`installSalt`) via `crypto.getRandomValues()`, persists to `chrome.storage.local` under key `branchai_install_salt`
+2. Derives AES-256 key via HKDF: `ikm = chrome.runtime.id`, `salt = installSalt`, `info = "branchai-api-key-encryption-v1"`
+3. Caches derived `CryptoKey` in module-level variable (lives as long as the page is open)
+
+**Dev fallback:** If `chrome.runtime.id` is undefined (running outside extension context), `encrypt()` returns plaintext as-is — mirrors existing `localStorage` fallback pattern in `state.js`. `decrypt()` warns and returns empty string.
+
+**Exports:**
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `encrypt` | `(plaintext) → { _enc: true, iv: '<base64>', ct: '<base64>' }` | Encrypts a string; returns plaintext if outside extension context or empty |
+| `decrypt` | `({ _enc, iv, ct }) → string` | Decrypts an encrypted object back to plaintext |
+| `isEncrypted` | `(value) → boolean` | Checks for `_enc: true` marker |
+
+### Modified files
+
+| File | Changes |
+|------|---------|
+| `app/src/state.js` | Added `import { encrypt, decrypt, isEncrypted } from './crypto.js'`. New `encryptApiKeys(settings)` replaces `.openai.apiKey` and `.anthropic.apiKey` with encrypted objects. New `decryptApiKeys(settings)` reverses. `persist()` clones state and encrypts keys before writing. `loadFromStorage()` decrypts after reading. **Backward compat:** plain string keys pass through unchanged; auto-encrypt on next `persist()`. |
+| `app/src/icons.js` | Added 3 SVG icons: `lock` (padlock), `shield` (security shield), `database` (storage icon) |
+| `app/src/ui.js` | Added collapsible "Security & Privacy" section to settings modal between Local LLM section and footer. Contains 4 items: Encrypted at rest (lock icon), Extension sandboxed (shield icon), Local-only storage (database icon), Open source (external link icon). Uses same `.settings-collapsible` pattern as Ollama section. |
+| `app/app.css` | Added ~35 lines: `.security-info` container, `.security-item` flex row, `.security-item-icon` (accent colored, 20px), `.security-item-body`, `.security-item-title` (13px bold), `.security-item-desc` (12px muted) |
+
+### Files NOT changed (no changes needed)
+
+- `manifest.json` — Web Crypto API needs no extra permissions
+- All provider files — they read decrypted in-memory `this.config.apiKey`
+- `background.js`, `content.js`, `router.js`, `utils.js`, `summarize.js`, `export_import.js`
+
+### Verification
+
+1. **Encryption works**: Enter API key → close/reopen extension → key persists and works for API calls
+2. **Storage encrypted**: DevTools → Application → Extension Storage → `branchai_state_v2` → API key values show `{ _enc: true, iv: "...", ct: "..." }` not plaintext
+3. **Backward compat**: Existing install with plaintext keys → update extension → keys auto-encrypt on next persist, no user action needed
+4. **Dev fallback**: Run `app/index.html` directly in browser → keys stored as plaintext (no crash)
+5. **Security info**: Open settings → "Security & Privacy" collapsible section visible with 4 items
+6. **Provider test**: After encryption, "Test" buttons in settings still work for OpenAI and Anthropic
+
+---
+
+## Phase 8B: IndexedDB Migration — PLANNED (not yet implemented)
+
+### Why IndexedDB
+
+- `chrome.storage.local` has ~10MB default limit; conversations grow unbounded
+- Current `persist()` serializes the **entire** state tree on every call (every message, every toggle)
+- IndexedDB supports per-record reads/writes with indexes — only write what changed
+
+### Schema — Database `branchai_db` v1
+
+```
+projects   → keyPath: "id", indexes: [updatedAt]
+branches   → keyPath: "id", indexes: [projectId, updatedAt]
+messages   → keyPath: auto-increment, indexes: [branchId]
+```
+
+### What stays in `chrome.storage.local`
+
+Settings only — provider config, dark mode, view mode, active IDs, encrypted API keys. Small, needed at boot before IndexedDB opens.
+
+### New files needed
+
+- `app/src/db.js` (~150 lines) — IndexedDB wrapper with CRUD for projects/branches/messages
+- `app/src/migration.js` (~60 lines) — Reads `branchai_state_v2`, decomposes nested structure into flat IndexedDB records, encrypts keys, backs up legacy data, removes old key
+
+### Files to modify
+
+- `app/src/state.js` — Major refactor: settings-only chrome.storage.local + async data accessors via `db.js`
+- `app/src/main.js` — Boot adds `migrateIfNeeded()`, `sendMessage()` uses async data layer
+- `app/src/ui.js` — Rendering receives pre-fetched data from in-memory caches
+- `app/src/export_import.js` — Updated for new data layer
+
+### View model pattern (preserves sync rendering)
+
+```js
+let _projects = [];   // cached from IndexedDB
+let _branches = [];   // for current project
+let _messages = [];   // for current branch
+// Mutations → update IndexedDB → refresh cache → render from cache
+```
+
+---
+
 ## Future: Provider API Options — DEFERRED
 
 Adding free-tier cloud providers (Google Gemini, Groq, OpenRouter) requires:
@@ -592,7 +690,8 @@ Deferred until infrastructure is in place.
 
 ## Resume Point
 
-**Phases 1–7 complete.** Next steps:
+**Phases 1–8A complete.** Next steps:
+- **Phase 8B**: IndexedDB migration — move conversations out of `chrome.storage.local` for scalability
 - Live-test content script integration on ChatGPT (Phase 4 verification)
 - Polish: empty state illustrations, loading skeletons, keyboard shortcuts
 - Remove legacy `branch-host/` and `branch-chat-ext/` directories
