@@ -186,11 +186,7 @@ function renderProjectsScreen() {
 
   if (!projects.length) {
     html += `<div class="empty-state"><p>No projects yet. Create one to get started.</p></div>`;
-    el.innerHTML = html;
-    return;
-  }
-
-  if (state.viewMode === 'grid') {
+  } else if (state.viewMode === 'grid') {
     html += '<div class="cards-grid">';
     for (const p of projects) {
       const branchCount = (p.branches || []).length;
@@ -228,6 +224,38 @@ function renderProjectsScreen() {
     }
     html += '</div>';
   }
+
+  // Privacy section
+  html += `
+    <div class="privacy-section">
+      <div class="privacy-badge">${ICONS.shield} Privacy-First &amp; Open Source</div>
+      <h2 class="privacy-title">Your Data, Your Control</h2>
+      <p class="privacy-subtitle">BranchAI is built with privacy as a core principle. Your conversations, API keys, and data never leave your browser.</p>
+      <div class="privacy-cards">
+        <div class="privacy-card">
+          <div class="privacy-card-icon">${ICONS.userX}</div>
+          <div class="privacy-card-title">No User Accounts</div>
+          <div class="privacy-card-desc">Use immediately without signing up or logging in</div>
+        </div>
+        <div class="privacy-card">
+          <div class="privacy-card-icon">${ICONS.database}</div>
+          <div class="privacy-card-title">Local Storage Only</div>
+          <div class="privacy-card-desc">All data stays in your browser \u2014 nothing stored in the cloud</div>
+        </div>
+        <div class="privacy-card">
+          <div class="privacy-card-icon">${ICONS.shieldCheck}</div>
+          <div class="privacy-card-title">Privacy First</div>
+          <div class="privacy-card-desc">Your conversations and API keys never touch our servers</div>
+        </div>
+        <div class="privacy-card">
+          <div class="privacy-card-icon">${ICONS.code}</div>
+          <div class="privacy-card-title">Fully Open Source</div>
+          <div class="privacy-card-desc">Inspect the code, contribute, or self-host</div>
+        </div>
+      </div>
+      <p class="privacy-verify">Want to verify? Check out our <a href="https://github.com/kartikuge/branchai" target="_blank" rel="noopener">source code on GitHub</a>.</p>
+      <p class="privacy-collect">What data do we collect? Nothing.</p>
+    </div>`;
 
   el.innerHTML = html;
 

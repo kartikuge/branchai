@@ -1053,3 +1053,103 @@ header {
   color: var(--text-dim);
 }
 .empty-state p { margin: 8px 0; font-size: 15px; }
+
+/* Privacy section (home page) */
+.privacy-section {
+  text-align: center;
+  margin-top: 48px;
+  padding: 40px 0;
+}
+
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+}
+.privacy-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.privacy-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 16px 0 0;
+  color: var(--text);
+}
+
+.privacy-subtitle {
+  font-size: 15px;
+  color: var(--text-muted);
+  max-width: 520px;
+  margin: 8px auto 0;
+  line-height: 1.5;
+}
+
+.privacy-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-top: 32px;
+  text-align: left;
+}
+
+.privacy-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.privacy-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.privacy-card-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.privacy-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 14px;
+}
+
+.privacy-card-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.privacy-verify {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-top: 32px;
+}
+.privacy-verify a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.privacy-verify a:hover {
+  color: var(--accent-hover);
+}
+
+.privacy-collect {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 12px;
+}
