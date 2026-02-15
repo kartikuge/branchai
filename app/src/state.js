@@ -1,7 +1,13 @@
-// state.js — chrome.storage.local backed state with provider settings
+// state.js — IndexedDB + chrome.storage.local backed state with provider settings
 
 import { genId, now, pickDefaultEmoji } from './utils.js';
 import { encrypt, decrypt, isEncrypted } from './crypto.js';
+import {
+  getAllProjects, getBranchesForProject, getMessagesForBranch,
+  putProject, putBranch, replaceMessages,
+  deleteProjectFromDB, deleteBranchFromDB, putProjectWithChildren,
+} from './db.js';
+import { SETTINGS_KEY } from './migration.js';
 
 export const state = {
   projects: [],
@@ -73,9 +79,7 @@ export function currentBranch() {
   return p.branches.find(b => b.id === state.activeBranchId) || null;
 }
 
-// --- persistence (chrome.storage.local) ---
-
-const STORAGE_KEY = 'branchai_state_v2';
+// --- encryption helpers ---
 
 async function encryptApiKeys(settings) {
   if (settings?.openai?.apiKey && typeof settings.openai.apiKey === 'string' && settings.openai.apiKey !== '') {
@@ -95,27 +99,116 @@ async function decryptApiKeys(settings) {
   }
 }
 
-export async function persist() {
+// --- persistence ---
+
+export async function persistSettings() {
   try {
-    const clone = JSON.parse(JSON.stringify(state));
-    await encryptApiKeys(clone.settings);
-    await chrome.storage.local.set({ [STORAGE_KEY]: clone });
-  } catch {
-    // Fallback for development outside extension context
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const clone = JSON.parse(JSON.stringify(state.settings));
+    await encryptApiKeys(clone);
+    const data = {
+      settings: clone,
+      viewMode: state.viewMode,
+      activeProjectId: state.activeProjectId,
+      activeBranchId: state.activeBranchId,
+    };
+    await chrome.storage.local.set({ [SETTINGS_KEY]: data });
+  } catch (e) {
+    console.error('[BranchAI] persistSettings', e);
   }
 }
 
-async function loadFromStorage() {
+export async function persistProject(projectId) {
+  const p = state.projects.find(x => x.id === projectId);
+  if (!p) return;
+  // Write entire project tree to IDB
+  await putProjectWithChildren(p);
+}
+
+export async function persistBranchMessages(branchId) {
+  // Find the branch in state
+  for (const p of state.projects) {
+    const b = p.branches.find(x => x.id === branchId);
+    if (b) {
+      // Write branch metadata to IDB
+      const { messages, ...branchRecord } = b;
+      branchRecord.projectId = p.id;
+      await putBranch(branchRecord);
+      // Write messages to IDB
+      await replaceMessages(branchId, messages || []);
+      return;
+    }
+  }
+}
+
+export async function persistBranchMetadata(branch, projectId) {
+  const { messages, ...branchRecord } = branch;
+  branchRecord.projectId = projectId;
+  await putBranch(branchRecord);
+}
+
+// Compat shim — called by ui.js for viewMode/activeId changes
+export async function persist() {
+  await persistSettings();
+}
+
+// --- loading ---
+
+async function loadSettings() {
   try {
-    const result = await chrome.storage.local.get(STORAGE_KEY);
-    const loaded = result[STORAGE_KEY] || null;
-    if (loaded) await decryptApiKeys(loaded.settings);
-    return loaded;
-  } catch {
-    // Fallback
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const result = await chrome.storage.local.get(SETTINGS_KEY);
+    const saved = result[SETTINGS_KEY];
+    if (saved) {
+      if (saved.settings) {
+        await decryptApiKeys(saved.settings);
+        Object.assign(state.settings, saved.settings);
+      }
+      if (saved.viewMode) state.viewMode = saved.viewMode;
+      if (saved.activeProjectId) state.activeProjectId = saved.activeProjectId;
+      if (saved.activeBranchId) state.activeBranchId = saved.activeBranchId;
+    }
+  } catch (e) {
+    console.error('[BranchAI] loadSettings', e);
+  }
+}
+
+async function reloadFromDB() {
+  try {
+    const projects = await getAllProjects();
+    // Reconstruct nested tree
+    const nested = [];
+    for (const proj of projects) {
+      const branches = await getBranchesForProject(proj.id);
+      for (const b of branches) {
+        const rawMsgs = await getMessagesForBranch(b.id);
+        // Dedup: keep only the first message per seq value
+        const seen = new Set();
+        const uniqueMsgs = [];
+        for (const m of rawMsgs) {
+          if (!seen.has(m.seq)) {
+            seen.add(m.seq);
+            uniqueMsgs.push(m);
+          }
+        }
+        // If duplicates were found, repair the IDB data
+        if (uniqueMsgs.length < rawMsgs.length) {
+          console.warn(`[BranchAI] Deduped branch ${b.id}: ${rawMsgs.length} → ${uniqueMsgs.length} messages`);
+          const cleaned = uniqueMsgs.map(({ branchId, seq, ...msg }) => msg);
+          await replaceMessages(b.id, cleaned);
+          b.messages = cleaned;
+        } else {
+          b.messages = uniqueMsgs.map(({ branchId, seq, ...msg }) => msg);
+        }
+        delete b.projectId;
+      }
+      proj.branches = branches;
+      nested.push(proj);
+    }
+    // Sort projects by updatedAt descending (most recent first)
+    nested.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    state.projects = nested;
+  } catch (e) {
+    console.error('[BranchAI] reloadFromDB', e);
+    state.projects = [];
   }
 }
 
@@ -152,7 +245,8 @@ export function newProject(name = 'New Project', seedMessages = null, firstBranc
   state.projects = [proj, ...state.projects];
   state.activeProjectId = pid;
   normalizeState();
-  persist();
+  persistProject(pid);
+  persistSettings();
   return proj;
 }
 
@@ -174,14 +268,16 @@ export function newBranch(title = 'New Branch', seedMessages = [], branchedFromM
   p.updatedAt = ts;
   state.activeBranchId = br.id;
   normalizeState();
-  persist();
+  persistProject(p.id);
+  persistSettings();
   return br;
 }
 
 export function deleteProject(projectId) {
   state.projects = state.projects.filter(p => p.id !== projectId);
   normalizeState();
-  persist();
+  deleteProjectFromDB(projectId);
+  persistSettings();
 }
 
 export function deleteBranch(branchId) {
@@ -189,7 +285,8 @@ export function deleteBranch(branchId) {
   if (!p) return;
   p.branches = p.branches.filter(b => b.id !== branchId);
   normalizeState();
-  persist();
+  deleteBranchFromDB(branchId);
+  persistSettings();
 }
 
 export function updateSettings(partial) {
@@ -197,20 +294,21 @@ export function updateSettings(partial) {
   if (partial.ollama) Object.assign(state.settings.ollama, partial.ollama);
   if (partial.openai) Object.assign(state.settings.openai, partial.openai);
   if (partial.anthropic) Object.assign(state.settings.anthropic, partial.anthropic);
-  persist();
+  persistSettings();
 }
 
 // --- boot ---
 
 export async function loadInitial(injectedTranscript, anchorIdx = null, title = null) {
-  // 1) load saved state
-  const saved = await loadFromStorage();
-  if (saved) {
-    Object.assign(state, saved);
-  }
+  // 1) load settings from chrome.storage.local
+  await loadSettings();
+
+  // 2) load projects/branches/messages from IndexedDB
+  await reloadFromDB();
+
   normalizeState();
 
-  // 2) if we got a transcript from the extension, create a new project
+  // 3) if we got a transcript from the extension, create a new project
   if (Array.isArray(injectedTranscript) && injectedTranscript.length) {
     const cut = Number.isFinite(anchorIdx)
       ? Math.max(0, Math.min(anchorIdx, injectedTranscript.length - 1))
@@ -219,7 +317,7 @@ export async function loadInitial(injectedTranscript, anchorIdx = null, title = 
     newProject(title || 'Branched Chat', seed, 'Branched from Chat');
   }
 
-  // 3) if nothing exists, create a scratch project with an empty branch
+  // 4) if nothing exists, create a scratch project with an empty branch
   if (!state.projects.length) {
     const proj = newProject('Scratchpad');
     if (!proj.branches.length) {
@@ -234,5 +332,5 @@ export async function loadInitial(injectedTranscript, anchorIdx = null, title = 
   }
 
   normalizeState();
-  await persist();
+  await persistSettings();
 }

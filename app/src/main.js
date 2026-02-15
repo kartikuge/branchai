@@ -1,5 +1,6 @@
 // main.js — provider-based orchestration (screen-based UI)
-import { loadInitial, persist, state, currentBranch, currentProject, updateSettings } from './state.js';
+import { loadInitial, persist, persistSettings, persistBranchMessages, persistBranchMetadata, state, currentBranch, currentProject, updateSettings } from './state.js';
+import { putProject } from './db.js';
 import { renderAll, setModelStatus, getSettingsValues, setCurrentModelId, setCallbacks, appendStreamingBubble, updateStreamingContent } from './ui.js';
 import { getProvider, listProviders } from './providers/registry.js';
 import { SCREENS, navigateTo, onScreenChange, getCurrentScreen } from './router.js';
@@ -209,7 +210,7 @@ async function sendMessage() {
 
   if (userText?.trim()) {
     b.messages.push({ role: 'user', content: userText.trim(), ts: now() });
-    await persist();
+    await persistBranchMessages(b.id);
     renderAll();
   }
 
@@ -257,19 +258,21 @@ async function sendMessage() {
     b.updatedAt = now();
     const p = currentProject();
     if (p) p.updatedAt = now();
-    await persist();
+    await persistBranchMessages(b.id);
+    if (p) putProject({ id: p.id, name: p.name, description: p.description, emoji: p.emoji, createdAt: p.createdAt, updatedAt: p.updatedAt });
     renderAll();
     setModelStatus(`${provider.name}: connected`, 'ok');
 
     // Fire-and-forget branch summary update
     if (b.messages.length !== b.summaryMsgCount) {
+      const _p = currentProject();
       summarizeBranch(provider, model, b).then(summary => {
         if (summary) {
           b.summary = summary;
           b.summaryMsgCount = b.messages.length;
-          persist();
+          if (_p) persistBranchMetadata(b, _p.id);
         }
-      });
+      }).catch(() => {});
     }
   } catch (e) {
     console.error('[BranchAI] run error', e);
@@ -282,6 +285,8 @@ async function sendMessage() {
 
 // --- lazy branch summarization ---
 
+const _summaryFailed = new Map(); // branchId → msgCount at failure
+
 function lazySummarizeBranches() {
   if (!activeProvider) return;
   const p = currentProject();
@@ -290,16 +295,25 @@ function lazySummarizeBranches() {
   if (!model) return;
 
   for (const b of p.branches) {
-    if (b.messages.length > 0 && b.summaryMsgCount !== b.messages.length) {
-      summarizeBranch(activeProvider, model, b).then(summary => {
-        if (summary) {
-          b.summary = summary;
-          b.summaryMsgCount = b.messages.length;
-          persist();
-          renderAll();
-        }
-      });
-    }
+    if (b.messages.length === 0) continue;
+    // Skip branches that already have a summary — the per-message
+    // summarize call in sendMessage() keeps them up-to-date.
+    if (b.summary) continue;
+    // Don't retry if we already failed at this message count
+    if (_summaryFailed.get(b.id) === b.messages.length) continue;
+
+    summarizeBranch(activeProvider, model, b).then(summary => {
+      if (summary) {
+        b.summary = summary;
+        b.summaryMsgCount = b.messages.length;
+        _summaryFailed.delete(b.id);
+        persistBranchMetadata(b, p.id);
+        renderAll();
+      }
+    }).catch(() => {
+      // Mark as failed at this message count — will retry only when new messages arrive
+      _summaryFailed.set(b.id, b.messages.length);
+    });
   }
 }
 
@@ -355,7 +369,9 @@ setCallbacks({
       } else {
         b.model = null; // Clear invalid model
       }
-      persist();
+      const p = currentProject();
+      if (p) persistBranchMetadata(b, p.id);
+      persistSettings();
     }
   },
   onModelChange: (e) => {
@@ -365,8 +381,14 @@ setCallbacks({
     const b = currentBranch();
     if (b) {
       b.model = currentModelId;
-      persist();
+      const p = currentProject();
+      if (p) persistBranchMetadata(b, p.id);
+      persistSettings();
     }
+  },
+  onChatRender: () => {
+    repopulateModelsFromCache();
+    populateProviders();
   },
   onSettingsSave: handleSettingsSave,
   onDarkModeChange: async (isDark) => {
@@ -433,6 +455,14 @@ onScreenChange(async (screen) => {
 // --- boot ---
 
 (async function boot() {
+  // 0) Run one-time migration from legacy blob to IndexedDB
+  try {
+    const { migrateIfNeeded } = await import('./migration.js');
+    await migrateIfNeeded();
+  } catch (e) {
+    console.error('[BranchAI] migration import failed', e);
+  }
+
   // 1) Load state + any injected context
   const inj = await getInjectedContext();
   await loadInitial(inj?.ctx, inj?.anchor, inj?.title);

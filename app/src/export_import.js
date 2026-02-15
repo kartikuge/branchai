@@ -1,5 +1,5 @@
 // export_import.js — project export/import
-import { state, currentProject, persist } from './state.js';
+import { state, currentProject, persistProject, persistSettings } from './state.js';
 import { genId, pickDefaultEmoji, now } from './utils.js';
 
 export function exportCurrentProject() {
@@ -81,5 +81,6 @@ export async function importFromFile(file) {
   state.projects.unshift(proj);
   state.activeProjectId = pid;
   state.activeBranchId = proj.branches[0]?.id || null;
-  await persist();
+  await persistProject(pid);
+  await persistSettings();
 }

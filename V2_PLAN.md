@@ -6,10 +6,10 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 
 ---
 
-## Current State (Phase 8A Complete)
+## Current State (Post Phase 8B + UI Enhancements + Bug Fixes)
 
 **Branch:** `v2_refactor`
-**Status:** Phases 1–8A complete + Settings UX fixes. API keys are now encrypted at rest using AES-256-GCM. Settings modal has fixed height with scrollable body, delete API key buttons, and Security & Privacy info section. Content script integration (Phase 4) still needs live testing on ChatGPT.
+**Status:** Phases 1–8B complete + Settings UX fixes + Privacy section on home page + Summarization bug fixes (model override to gpt-4o-mini, retry loop fix, temperature compat) + Message duplication bug fix in IndexedDB + Model dropdown regression fix. Project/branch/message data stored in IndexedDB (per-record read/write). Settings in `chrome.storage.local`. One-time migration from legacy blob runs automatically on first boot. API keys encrypted at rest (AES-256-GCM). Content script integration (Phase 4) still needs live testing on ChatGPT.
 
 ### File structure
 
@@ -21,12 +21,14 @@ branchai/
     app.css                             # Dark-first CSS with custom properties
     src/
       main.js                           # Entry point, provider orchestration, screen-based boot
-      state.js                          # State management, chrome.storage.local, extended data model
+      state.js                          # State management, IndexedDB + chrome.storage.local persistence
       ui.js                             # Screen-based DOM rendering (XSS-safe)
       utils.js                          # Helpers (genId, escapeHtml, pickDefaultEmoji, timeAgo, etc.)
       router.js                         # Minimal screen-based view manager (NEW in Phase 6)
-      icons.js                          # Inline SVG icon strings (NEW in Phase 6)
+      icons.js                          # Inline SVG icon strings (NEW in Phase 6, extended: shieldCheck, userX, code)
       crypto.js                         # AES-256-GCM encryption for API keys at rest (NEW in Phase 8A)
+      db.js                             # IndexedDB wrapper for per-record storage (NEW in Phase 8B)
+      migration.js                      # One-time migration from chrome.storage.local to IndexedDB (NEW in Phase 8B)
       export_import.js                  # Project export/import with extended fields
       providers/
         base.js                         # Abstract provider interface
@@ -393,7 +395,7 @@ All features from the old 3-pane UI preserved in the new screen-based UI:
 - **API calls from extension page, not service worker:** MV3 service workers die after 30s idle. Extension pages stay alive. `host_permissions` bypasses CORS from extension pages.
 - **No token limit in MVP:** Send all messages, let the API error if too long. Token windowing is a later enhancement.
 - **Vanilla JS:** Codebase is ~2000 lines total across 10 source files. No framework needed.
-- **chrome.storage.local over localStorage:** Persists across tab closes, survives extension updates, higher storage limits.
+- **IndexedDB for data, chrome.storage.local for settings:** Conversations/projects stored per-record in IndexedDB (no size limit, granular writes). Settings stay in chrome.storage.local (small, fast boot read). Compat shim keeps ui.js unchanged.
 - **Screen-based navigation over 3-pane layout:** Each screen gets full viewport width. Header content changes per screen. Router is ~25 lines with callback pattern.
 - **Callback pattern over direct imports:** `ui.js` doesn't import from `main.js`. Instead, `main.js` registers callbacks via `setCallbacks()` that `ui.js` invokes on user actions. Avoids circular dependencies.
 - **Cached model lists:** Provider models fetched once on `activateProvider()`, stored in `_cachedModels`. Re-entering CHAT screen repopulates selects from cache via `repopulateModelsFromCache()` without re-fetching.
@@ -643,7 +645,7 @@ Encryption module using Web Crypto API (AES-256-GCM).
 ### Fixes
 
 **Fixed modal size with scrollable body:**
-- `.modal` now uses `max-height: 85vh`, `display: flex`, `flex-direction: column`
+- `.modal` now uses `height: 85vh` (fixed, not max-height — prevents the modal from resizing when collapsible sections expand/collapse), `display: flex`, `flex-direction: column`
 - `.modal-body` gets `overflow-y: auto` with thin custom scrollbar styling
 - `.modal-header` and `.modal-footer` use `flex-shrink: 0` to always remain visible
 - When both Ollama and Security dropdowns are open, content scrolls smoothly while buttons stay accessible
@@ -657,51 +659,137 @@ Encryption module using Web Crypto API (AES-256-GCM).
 
 | File | Changes |
 |------|---------|
-| `app/app.css` | `.modal` → added `max-height`, flex layout; `.modal-body` → `overflow-y: auto` with scrollbar styling; `.modal-header`/`.modal-footer` → `flex-shrink: 0`; new `.btn-delete-key` style (red outline, fills red on hover) |
+| `app/app.css` | `.modal` → `width: 520px`, `height: 85vh` (fixed size, no resizing on collapsible toggle), flex layout; `.modal-body` → `overflow-y: auto` with scrollbar styling; `.modal-header`/`.modal-footer` → `flex-shrink: 0`; new `.btn-delete-key` style (red outline, fills red on hover) |
 | `app/src/ui.js` | Added conditional "Delete" buttons for OpenAI/Anthropic keys; wired delete handlers with confirm + state clear + modal refresh; wired save button inside `openSettingsModal()` for post-delete re-creation |
 
 ---
 
-## Phase 8B: IndexedDB Migration — PLANNED (not yet implemented)
+## Phase 8B: IndexedDB Migration — DONE
 
-### Why IndexedDB
+### Problem
 
-- `chrome.storage.local` has ~10MB default limit; conversations grow unbounded
-- Current `persist()` serializes the **entire** state tree on every call (every message, every toggle)
-- IndexedDB supports per-record reads/writes with indexes — only write what changed
+The entire state tree (all projects, branches, messages, and settings) was serialized as one JSON blob into `chrome.storage.local` on every single mutation — every message sent, every branch click, every settings toggle. Two issues:
+1. `chrome.storage.local` has a ~10MB default limit; conversations grow unbounded
+2. Writing the entire state on every keystroke is wasteful
+
+### Solution
+
+Moved project/branch/message data into IndexedDB (per-record read/write). Settings stay in `chrome.storage.local` (small, needed at boot). Existing data migrated seamlessly on first boot.
 
 ### Schema — Database `branchai_db` v1
 
-```
-projects   → keyPath: "id", indexes: [updatedAt]
-branches   → keyPath: "id", indexes: [projectId, updatedAt]
-messages   → keyPath: auto-increment, indexes: [branchId]
-```
+| Store | keyPath | Indexes |
+|-------|---------|---------|
+| `projects` | `id` | `updatedAt` |
+| `branches` | `id` | `by_project` (projectId), `updatedAt` |
+| `messages` | auto-increment | `by_branch` (branchId), `by_branch_seq` ([branchId, seq]) |
 
 ### What stays in `chrome.storage.local`
 
-Settings only — provider config, dark mode, view mode, active IDs, encrypted API keys. Small, needed at boot before IndexedDB opens.
+Settings only under key `branchai_settings_v1` — provider config, dark mode, view mode, active IDs, encrypted API keys. Small, needed at boot before IndexedDB opens.
 
-### New files needed
+### New file: `app/src/db.js` (~220 lines)
 
-- `app/src/db.js` (~150 lines) — IndexedDB wrapper with CRUD for projects/branches/messages
-- `app/src/migration.js` (~60 lines) — Reads `branchai_state_v2`, decomposes nested structure into flat IndexedDB records, encrypts keys, backs up legacy data, removes old key
+IndexedDB wrapper. Lazy-open singleton via `getDB()`.
 
-### Files to modify
+**Exports:**
+| Function | Description |
+|----------|-------------|
+| `getDB()` | Lazy-open singleton, creates stores on upgrade |
+| `getAllProjects()` | Read all project records |
+| `getProject(id)` | Read single project |
+| `putProject(obj)` | Upsert project record |
+| `deleteProjectFromDB(id)` | Cascade delete: project + branches + messages |
+| `getBranchesForProject(projectId)` | Read branches by project index |
+| `getBranch(id)` | Read single branch |
+| `putBranch(obj)` | Upsert branch record |
+| `deleteBranchFromDB(id)` | Cascade delete: branch + messages |
+| `getMessagesForBranch(branchId)` | Read messages sorted by [branchId, seq] |
+| `replaceMessages(branchId, msgs)` | Delete existing + write new messages with seq |
+| `appendMessage(branchId, msg, seq)` | Add single message |
+| `putProjectWithChildren(nestedProject)` | Atomic bulk write of project + branches + messages (used by migration + import) |
+| `exportProjectTree(projectId)` | Reassemble nested tree from IDB (project + branches + messages) |
 
-- `app/src/state.js` — Major refactor: settings-only chrome.storage.local + async data accessors via `db.js`
-- `app/src/main.js` — Boot adds `migrateIfNeeded()`, `sendMessage()` uses async data layer
-- `app/src/ui.js` — Rendering receives pre-fetched data from in-memory caches
-- `app/src/export_import.js` — Updated for new data layer
+All functions wrapped in try/catch with `[BranchAI IDB]` console logging. Read failures return `[]`/`null`. Write failures are silent (in-memory state remains valid).
 
-### View model pattern (preserves sync rendering)
+### New file: `app/src/migration.js` (~65 lines)
 
-```js
-let _projects = [];   // cached from IndexedDB
-let _branches = [];   // for current project
-let _messages = [];   // for current branch
-// Mutations → update IndexedDB → refresh cache → render from cache
-```
+One-time migration from `branchai_state_v2` blob to IndexedDB.
+
+**Constants:**
+- `LEGACY_KEY = 'branchai_state_v2'`
+- `MIGRATED_FLAG = 'branchai_idb_migrated_v1'`
+- `SETTINGS_KEY = 'branchai_settings_v1'` (exported, used by state.js)
+
+**`migrateIfNeeded(): Promise<boolean>`:**
+1. Check `MIGRATED_FLAG` in chrome.storage.local — if set, return false (fast path)
+2. Read legacy blob from `LEGACY_KEY`
+3. If no data or empty projects — set flag, return false
+4. For each project: normalize fields, add `projectId` to branches, call `putProjectWithChildren()`
+5. Write settings to `SETTINGS_KEY` (settings + viewMode + activeProjectId + activeBranchId)
+6. Back up legacy data under `branchai_legacy_backup` (do NOT delete original)
+7. Set `MIGRATED_FLAG = true`
+8. On error: set `MIGRATED_FLAG = 'failed'` to prevent infinite retries
+
+### Modified file: `app/src/state.js` — Major refactor
+
+**State shape unchanged** — `state.projects` is still a nested tree with branches and messages. Only the persistence layer changed.
+
+**Removed:** `STORAGE_KEY`, old `persist()` (full-blob write), old `loadFromStorage()`
+
+**New persistence functions:**
+| Function | Description |
+|----------|-------------|
+| `persistSettings()` | Writes `{settings, viewMode, activeProjectId, activeBranchId}` to `chrome.storage.local[SETTINGS_KEY]` with encrypted API keys |
+| `persistProject(projectId)` | Writes project + all its branches + all messages to IDB via `putProjectWithChildren()` |
+| `persistBranchMessages(branchId)` | Writes branch metadata + messages to IDB (for sendMessage) |
+| `persistBranchMetadata(branch, projectId)` | Writes only branch record to IDB (for summary/provider updates) |
+| `persist()` | **Compat shim** — only calls `persistSettings()`. Serves ui.js viewMode/activeId changes without modification. |
+
+**New loading functions:**
+| Function | Description |
+|----------|-------------|
+| `loadSettings()` | Reads `chrome.storage.local[SETTINGS_KEY]`, decrypts API keys |
+| `reloadFromDB()` | Reads all projects/branches/messages from IDB, reconstructs nested `state.projects` tree, sorted by updatedAt desc |
+
+**Mutation function updates:**
+- `newProject()` → calls `persistProject(pid)` + `persistSettings()` (fire-and-forget)
+- `newBranch()` → calls `persistProject(p.id)` + `persistSettings()` (fire-and-forget)
+- `deleteProject()` → calls `deleteProjectFromDB(id)` + `persistSettings()`
+- `deleteBranch()` → calls `deleteBranchFromDB(id)` + `persistSettings()`
+- `updateSettings()` → calls `persistSettings()` only
+
+### Modified file: `app/src/main.js`
+
+**Boot:** Added `migrateIfNeeded()` call (dynamic import) before `loadInitial()`.
+
+**`sendMessage()` changes:**
+- After user message: `persistBranchMessages(b.id)` instead of `persist()`
+- After assistant response: `persistBranchMessages(b.id)` + `putProject()` for project.updatedAt
+
+**Summarization:** `persist()` → `persistBranchMetadata(b, p.id)`
+
+**`onProviderChange`/`onModelChange`:** `persist()` → `persistBranchMetadata(b, p.id)` + `persistSettings()`
+
+### Modified file: `app/src/export_import.js`
+
+- Import: `persist()` → `persistProject(pid)` + `persistSettings()`
+- Export: unchanged (reads from in-memory state)
+
+### Unchanged: `app/src/ui.js`
+
+All `persist()` calls in ui.js are for UI state (viewMode, activeProjectId, activeBranchId) — the compat shim handles these correctly. No changes needed.
+
+### Verification
+
+1. **Fresh install**: 3 IDB stores created, `branchai_settings_v1` in Extension Storage, no `branchai_state_v2`
+2. **Migration**: Existing data migrates on first boot, console shows `[BranchAI] Migrated N projects to IndexedDB`, `branchai_legacy_backup` created, flag set
+3. **Re-run safety**: Migration does not re-run on subsequent boots (flag check)
+4. **CRUD**: Create/delete projects and branches reflected in IDB stores with cascade deletes
+5. **Messages**: Send messages → appear in IDB `messages` store with correct branchId and seq
+6. **Persistence**: Close/reopen → all data intact from IDB
+7. **Settings**: API keys encrypted in `branchai_settings_v1`, dark mode/provider preserved
+8. **Export/Import**: Round-trip works, imported data written to IDB
 
 ---
 
@@ -716,10 +804,207 @@ Deferred until infrastructure is in place.
 
 ---
 
+## Privacy Section on Home Page — DONE
+
+### Goal
+
+Add a "Your Data, Your Control" privacy section to the bottom of the home page, with four info cards and a closing "What data do we collect? Nothing." line. Visible in both grid/list view modes and below the empty state.
+
+### New icons (`app/src/icons.js`)
+
+| Icon | SVG Description |
+|------|-----------------|
+| `shieldCheck` | Shield outline with checkmark path inside (for "Privacy First" card) |
+| `userX` | Person silhouette with X lines (for "No User Accounts" card) |
+| `code` | Code angle brackets `</>` (for "Fully Open Source" card) |
+
+Existing `database` and `shield` icons reused for "Local Storage Only" and the badge pill.
+
+### HTML changes (`app/src/ui.js`)
+
+`renderProjectsScreen()` restructured so the privacy section always renders at the bottom — both when projects exist (grid or list) and on empty state. Previously, the empty state had an early `return` that would skip any appended content.
+
+Privacy section structure:
+```
+.privacy-section
+  .privacy-badge  →  shield icon + "Privacy-First & Open Source"
+  h2.privacy-title  →  "Your Data, Your Control"
+  p.privacy-subtitle  →  "BranchAI is built with privacy..."
+  .privacy-cards (4-col responsive grid)
+    .privacy-card × 4:
+      1. userX → "No User Accounts" / "Use immediately without signing up or logging in"
+      2. database → "Local Storage Only" / "All data stays in your browser — nothing stored in the cloud"
+      3. shieldCheck → "Privacy First" / "Your conversations and API keys never touch our servers"
+      4. code → "Fully Open Source" / "Inspect the code, contribute, or self-host"
+  p.privacy-verify  →  "Want to verify?..." with GitHub link
+  p.privacy-collect  →  "What data do we collect? Nothing."
+```
+
+### CSS changes (`app/app.css`)
+
+~65 lines of new styles:
+
+| Class | Key Styles |
+|-------|------------|
+| `.privacy-section` | `text-align: center`, `margin-top: 48px`, `padding: 40px 0` |
+| `.privacy-badge` | `inline-flex` pill, `border: 1px solid var(--accent)`, `border-radius: 20px`, accent text, 12px, 14px icon |
+| `.privacy-title` | 28px bold, `margin-top: 16px` |
+| `.privacy-subtitle` | 15px muted, `max-width: 520px`, `margin: auto` |
+| `.privacy-cards` | `grid`, `repeat(auto-fill, minmax(200px, 1fr))`, `gap: 16px`, `margin-top: 32px`, `text-align: left` |
+| `.privacy-card` | `border: 1px solid var(--border)`, `border-radius: 12px`, `padding: 24px` |
+| `.privacy-card-icon` | 40px rounded square, `var(--accent-soft)` background, accent icon color, 20px SVG |
+| `.privacy-card-title` | 15px semibold, `margin-top: 14px` |
+| `.privacy-card-desc` | 13px muted, `margin-top: 6px` |
+| `.privacy-verify` | 14px muted, `margin-top: 32px`, link with accent underline |
+| `.privacy-collect` | 13px dim, `margin-top: 12px` |
+
+---
+
+## Summarization Bug Fixes — DONE
+
+### Problem
+
+Multiple cascading issues with branch auto-summarization:
+
+1. **400 errors flooding the console** — OpenAI returned `400 Bad Request` on every summarize call
+2. **Infinite retry loop** — failed branches retried on every PROJECT screen navigation
+3. **Empty summaries from reasoning models** — `gpt-5-mini` used all `max_completion_tokens` for reasoning, returning `"content": ""`
+4. **Unnecessary re-summarization** — branches with existing summaries were re-requested
+
+### Root causes and fixes
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| 400 Bad Request | `summarizeBranch()` sent `temperature: 0.3` — rejected by `gpt-5-mini` (and o-series models) which only accept default (1) | Removed `temperature` from summarize options entirely |
+| Infinite retry | On failure, `summaryMsgCount` was never updated, so `lazySummarizeBranches` re-fired the same requests on every navigation | Added `_summaryFailed` Map that tracks `branchId → msgCount` at failure; skips branches that already failed at current message count; clears on success |
+| Empty summaries | `max_completion_tokens: 60` too small for reasoning models — `gpt-5-mini` used all 60 tokens for reasoning (`"reasoning_tokens": 60`), leaving 0 for output | Increased `max_tokens` to 600; hardcoded `gpt-4o-mini` for OpenAI summaries (no need for expensive/reasoning models) |
+| Redundant re-summarization | `lazySummarizeBranches` checked `summaryMsgCount !== messages.length`, re-triggering for any branch where messages changed since last summary | Changed condition to `if (b.summary) continue` — skips any branch that already has a summary; per-message summarize in `sendMessage()` handles updates |
+
+### Model override for summarization (`app/src/summarize.js`)
+
+Summarization now uses a **hardcoded small model per provider**, ignoring the user's selected model:
+
+```js
+const SUMMARY_MODEL = {
+  openai: 'gpt-4o-mini',
+  anthropic: 'claude-haiku-4-5-20251001',
+};
+```
+
+Falls back to user's model for other providers (e.g., Ollama). Uses standard `system` role (no reasoning model workarounds needed). `max_tokens: 600`.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `app/src/summarize.js` | Rewrote: removed reasoning model detection (`REASONING_RE`), removed `temperature`, added `SUMMARY_MODEL` map per provider, `max_tokens` 60→600, added `console.warn` on failure + rethrow |
+| `app/src/main.js` | `lazySummarizeBranches()`: replaced `_summarizing` Set with `_summaryFailed` Map; added `if (b.summary) continue` to skip existing summaries; added `.catch()` to sendMessage summarize path |
+
+---
+
+## Message Duplication Bug Fix — DONE
+
+### Problem
+
+After creating new branches, all existing branch messages were duplicated (some 3x, some 6x). The message counts in the UI were wildly inflated (e.g., 104 → 624, 136 → 816).
+
+### Root cause
+
+`putProjectWithChildren()` in `db.js` used `msgStore.add()` to write messages — which always creates NEW records (messages store uses `autoIncrement` keys). **It never deleted existing messages first.** Each call appended duplicates.
+
+This function is called from:
+- `newBranch()` → `persistProject()` → `putProjectWithChildren()`
+- `newProject()` → `persistProject()` → `putProjectWithChildren()`
+- `migration.js` (one-time)
+
+So every `newBranch()` call re-wrote ALL messages for ALL branches in the project as additional records, multiplying messages.
+
+### Fix (`app/src/db.js`)
+
+Added existing message deletion before writes in `putProjectWithChildren()`:
+
+```js
+// delete existing messages for this branch first to prevent duplicates
+const existingKeys = await req2p(msgStore.index('by_branch').getAllKeys(branch.id));
+for (const k of existingKeys) msgStore.delete(k);
+```
+
+This matches the pattern already used in `replaceMessages()`.
+
+### Data repair on load (`app/src/state.js`)
+
+Added deduplication in `reloadFromDB()` to clean up already-duplicated data:
+
+```js
+// Dedup: keep only the first message per seq value
+const seen = new Set();
+const uniqueMsgs = [];
+for (const m of rawMsgs) {
+  if (!seen.has(m.seq)) {
+    seen.add(m.seq);
+    uniqueMsgs.push(m);
+  }
+}
+// If duplicates were found, repair the IDB data
+if (uniqueMsgs.length < rawMsgs.length) {
+  await replaceMessages(b.id, cleaned);
+}
+```
+
+On load, if duplicates are detected, the branch's messages are repaired in-place via `replaceMessages()` (which deletes-then-adds). Console warns with before/after counts.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `app/src/db.js` | `putProjectWithChildren()`: added message deletion before adding new messages for each branch |
+| `app/src/state.js` | `reloadFromDB()`: added seq-based deduplication with IDB repair via `replaceMessages()` |
+
+---
+
+## Model Dropdown Regression Fix — DONE
+
+### Problem
+
+After summarization started succeeding (with `gpt-4o-mini`), users saw "No model selected. Please select a model from the dropdown." when sending messages — even though the model dropdown visibly showed a model.
+
+### Root cause
+
+`lazySummarizeBranches()` fires on the PROJECT screen. When a summary succeeds, it calls `renderAll()`. If the user navigated to the CHAT screen in the meantime, `renderAll()` → `renderHeader()` recreates the `<select id="modelSel">` with only `<option>loading...</option>`. But `renderAll()` never called `repopulateModelsFromCache()` to refill it.
+
+When the user then sent a message, `$('modelSel')?.value` was `"loading..."`, which matched the guard condition → alert.
+
+This was a **latent bug** exposed by summarization now succeeding. Previously, summarization always failed with `gpt-5-mini`, so `renderAll()` was never called from the summarize handler.
+
+### Fix
+
+Added `onChatRender` callback to the callback system:
+
+**`app/src/ui.js`** — `renderAll()` now calls `_callbacks.onChatRender?.()` after `renderChatScreen()` + `replayModelStatus()` when on the chat screen.
+
+**`app/src/main.js`** — Registered `onChatRender` callback in `setCallbacks()`:
+
+```js
+onChatRender: () => {
+  repopulateModelsFromCache();
+  populateProviders();
+},
+```
+
+This ensures provider/model dropdowns are always repopulated from cache whenever the chat screen's header is re-rendered — regardless of what triggered `renderAll()`.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `app/src/ui.js` | `renderAll()`: added `_callbacks.onChatRender?.()` call when on CHAT screen |
+| `app/src/main.js` | `setCallbacks()`: added `onChatRender` callback that calls `repopulateModelsFromCache()` + `populateProviders()` |
+
+---
+
 ## Resume Point
 
-**Phases 1–8A complete + Settings UX fixes done.** Next steps:
-- **Phase 8B**: IndexedDB migration — move conversations out of `chrome.storage.local` for scalability
+**Phases 1–8B complete + Settings UX fixes + Privacy section + Summarization fixes + Message duplication fix done.** Next steps:
 - Live-test content script integration on ChatGPT (Phase 4 verification)
 - Polish: empty state illustrations, loading skeletons, keyboard shortcuts
 - Remove legacy `branch-host/` and `branch-chat-ext/` directories
