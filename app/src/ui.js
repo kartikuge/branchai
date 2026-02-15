@@ -522,6 +522,7 @@ export function renderAll() {
   } else if (screen === SCREENS.CHAT) {
     renderChatScreen();
     replayModelStatus();
+    _callbacks.onChatRender?.();
   }
 }
 

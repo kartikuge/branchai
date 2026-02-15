@@ -272,7 +272,7 @@ async function sendMessage() {
           b.summaryMsgCount = b.messages.length;
           if (_p) persistBranchMetadata(b, _p.id);
         }
-      });
+      }).catch(() => {});
     }
   } catch (e) {
     console.error('[BranchAI] run error', e);
@@ -285,6 +285,8 @@ async function sendMessage() {
 
 // --- lazy branch summarization ---
 
+const _summaryFailed = new Map(); // branchId → msgCount at failure
+
 function lazySummarizeBranches() {
   if (!activeProvider) return;
   const p = currentProject();
@@ -293,16 +295,25 @@ function lazySummarizeBranches() {
   if (!model) return;
 
   for (const b of p.branches) {
-    if (b.messages.length > 0 && b.summaryMsgCount !== b.messages.length) {
-      summarizeBranch(activeProvider, model, b).then(summary => {
-        if (summary) {
-          b.summary = summary;
-          b.summaryMsgCount = b.messages.length;
-          persistBranchMetadata(b, p.id);
-          renderAll();
-        }
-      });
-    }
+    if (b.messages.length === 0) continue;
+    // Skip branches that already have a summary — the per-message
+    // summarize call in sendMessage() keeps them up-to-date.
+    if (b.summary) continue;
+    // Don't retry if we already failed at this message count
+    if (_summaryFailed.get(b.id) === b.messages.length) continue;
+
+    summarizeBranch(activeProvider, model, b).then(summary => {
+      if (summary) {
+        b.summary = summary;
+        b.summaryMsgCount = b.messages.length;
+        _summaryFailed.delete(b.id);
+        persistBranchMetadata(b, p.id);
+        renderAll();
+      }
+    }).catch(() => {
+      // Mark as failed at this message count — will retry only when new messages arrive
+      _summaryFailed.set(b.id, b.messages.length);
+    });
   }
 }
 
@@ -374,6 +385,10 @@ setCallbacks({
       if (p) persistBranchMetadata(b, p.id);
       persistSettings();
     }
+  },
+  onChatRender: () => {
+    repopulateModelsFromCache();
+    populateProviders();
   },
   onSettingsSave: handleSettingsSave,
   onDarkModeChange: async (isDark) => {

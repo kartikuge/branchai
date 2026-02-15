@@ -245,6 +245,10 @@ export async function putProjectWithChildren(nestedProject) {
       branchRecord.projectId = nestedProject.id;
       branchStore.put(branchRecord);
 
+      // delete existing messages for this branch first to prevent duplicates
+      const existingKeys = await req2p(msgStore.index('by_branch').getAllKeys(branch.id));
+      for (const k of existingKeys) msgStore.delete(k);
+
       // write messages with seq
       for (let i = 0; i < (messages || []).length; i++) {
         msgStore.add({ ...messages[i], branchId: branch.id, seq: i });

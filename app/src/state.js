@@ -180,8 +180,24 @@ async function reloadFromDB() {
       const branches = await getBranchesForProject(proj.id);
       for (const b of branches) {
         const rawMsgs = await getMessagesForBranch(b.id);
-        // Strip IDB metadata from messages
-        b.messages = rawMsgs.map(({ branchId, seq, ...msg }) => msg);
+        // Dedup: keep only the first message per seq value
+        const seen = new Set();
+        const uniqueMsgs = [];
+        for (const m of rawMsgs) {
+          if (!seen.has(m.seq)) {
+            seen.add(m.seq);
+            uniqueMsgs.push(m);
+          }
+        }
+        // If duplicates were found, repair the IDB data
+        if (uniqueMsgs.length < rawMsgs.length) {
+          console.warn(`[BranchAI] Deduped branch ${b.id}: ${rawMsgs.length} → ${uniqueMsgs.length} messages`);
+          const cleaned = uniqueMsgs.map(({ branchId, seq, ...msg }) => msg);
+          await replaceMessages(b.id, cleaned);
+          b.messages = cleaned;
+        } else {
+          b.messages = uniqueMsgs.map(({ branchId, seq, ...msg }) => msg);
+        }
         delete b.projectId;
       }
       proj.branches = branches;
