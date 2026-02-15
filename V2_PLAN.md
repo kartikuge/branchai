@@ -9,7 +9,7 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 ## Current State (Phase 8A Complete)
 
 **Branch:** `v2_refactor`
-**Status:** Phases 1–8A complete + Settings UX fixes. API keys are now encrypted at rest using AES-256-GCM. Settings modal has fixed height with scrollable body, delete API key buttons, and Security & Privacy info section. Content script integration (Phase 4) still needs live testing on ChatGPT.
+**Status:** Phases 1–8A complete + Settings UX fixes. API keys are now encrypted at rest using AES-256-GCM. Settings modal has fixed `height: 85vh` (no longer resizes when sections expand/collapse), scrollable body, delete API key buttons, and Security & Privacy info section. Content script integration (Phase 4) still needs live testing on ChatGPT.
 
 ### File structure
 
@@ -643,7 +643,7 @@ Encryption module using Web Crypto API (AES-256-GCM).
 ### Fixes
 
 **Fixed modal size with scrollable body:**
-- `.modal` now uses `max-height: 85vh`, `display: flex`, `flex-direction: column`
+- `.modal` now uses `height: 85vh` (fixed, not max-height — prevents the modal from resizing when collapsible sections expand/collapse), `display: flex`, `flex-direction: column`
 - `.modal-body` gets `overflow-y: auto` with thin custom scrollbar styling
 - `.modal-header` and `.modal-footer` use `flex-shrink: 0` to always remain visible
 - When both Ollama and Security dropdowns are open, content scrolls smoothly while buttons stay accessible
@@ -657,7 +657,7 @@ Encryption module using Web Crypto API (AES-256-GCM).
 
 | File | Changes |
 |------|---------|
-| `app/app.css` | `.modal` → added `max-height`, flex layout; `.modal-body` → `overflow-y: auto` with scrollbar styling; `.modal-header`/`.modal-footer` → `flex-shrink: 0`; new `.btn-delete-key` style (red outline, fills red on hover) |
+| `app/app.css` | `.modal` → `width: 520px`, `height: 85vh` (fixed size, no resizing on collapsible toggle), flex layout; `.modal-body` → `overflow-y: auto` with scrollbar styling; `.modal-header`/`.modal-footer` → `flex-shrink: 0`; new `.btn-delete-key` style (red outline, fills red on hover) |
 | `app/src/ui.js` | Added conditional "Delete" buttons for OpenAI/Anthropic keys; wired delete handlers with confirm + state clear + modal refresh; wired save button inside `openSettingsModal()` for post-delete re-creation |
 
 ---

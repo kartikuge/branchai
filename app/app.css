@@ -664,9 +664,8 @@ header {
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 24px;
-  min-width: 400px;
-  max-width: 520px;
-  max-height: 85vh;
+  width: 520px;
+  height: 85vh;
   display: flex;
   flex-direction: column;
   box-shadow: var(--modal-shadow);
