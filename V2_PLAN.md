@@ -6,10 +6,10 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 
 ---
 
-## Current State (Phase 8B Complete)
+## Current State (Post Phase 8B + UI Enhancements + Bug Fixes)
 
 **Branch:** `v2_refactor`
-**Status:** Phases 1–8B complete + Settings UX fixes. Project/branch/message data now stored in IndexedDB (per-record read/write). Settings remain in `chrome.storage.local`. One-time migration from legacy blob runs automatically on first boot. API keys encrypted at rest using AES-256-GCM. Content script integration (Phase 4) still needs live testing on ChatGPT.
+**Status:** Phases 1–8B complete + Settings UX fixes + Privacy section on home page + Summarization bug fixes (model override to gpt-4o-mini, retry loop fix, temperature compat) + Message duplication bug fix in IndexedDB + Model dropdown regression fix. Project/branch/message data stored in IndexedDB (per-record read/write). Settings in `chrome.storage.local`. One-time migration from legacy blob runs automatically on first boot. API keys encrypted at rest (AES-256-GCM). Content script integration (Phase 4) still needs live testing on ChatGPT.
 
 ### File structure
 
@@ -25,7 +25,7 @@ branchai/
       ui.js                             # Screen-based DOM rendering (XSS-safe)
       utils.js                          # Helpers (genId, escapeHtml, pickDefaultEmoji, timeAgo, etc.)
       router.js                         # Minimal screen-based view manager (NEW in Phase 6)
-      icons.js                          # Inline SVG icon strings (NEW in Phase 6)
+      icons.js                          # Inline SVG icon strings (NEW in Phase 6, extended: shieldCheck, userX, code)
       crypto.js                         # AES-256-GCM encryption for API keys at rest (NEW in Phase 8A)
       db.js                             # IndexedDB wrapper for per-record storage (NEW in Phase 8B)
       migration.js                      # One-time migration from chrome.storage.local to IndexedDB (NEW in Phase 8B)
@@ -804,9 +804,207 @@ Deferred until infrastructure is in place.
 
 ---
 
+## Privacy Section on Home Page — DONE
+
+### Goal
+
+Add a "Your Data, Your Control" privacy section to the bottom of the home page, with four info cards and a closing "What data do we collect? Nothing." line. Visible in both grid/list view modes and below the empty state.
+
+### New icons (`app/src/icons.js`)
+
+| Icon | SVG Description |
+|------|-----------------|
+| `shieldCheck` | Shield outline with checkmark path inside (for "Privacy First" card) |
+| `userX` | Person silhouette with X lines (for "No User Accounts" card) |
+| `code` | Code angle brackets `</>` (for "Fully Open Source" card) |
+
+Existing `database` and `shield` icons reused for "Local Storage Only" and the badge pill.
+
+### HTML changes (`app/src/ui.js`)
+
+`renderProjectsScreen()` restructured so the privacy section always renders at the bottom — both when projects exist (grid or list) and on empty state. Previously, the empty state had an early `return` that would skip any appended content.
+
+Privacy section structure:
+```
+.privacy-section
+  .privacy-badge  →  shield icon + "Privacy-First & Open Source"
+  h2.privacy-title  →  "Your Data, Your Control"
+  p.privacy-subtitle  →  "BranchAI is built with privacy..."
+  .privacy-cards (4-col responsive grid)
+    .privacy-card × 4:
+      1. userX → "No User Accounts" / "Use immediately without signing up or logging in"
+      2. database → "Local Storage Only" / "All data stays in your browser — nothing stored in the cloud"
+      3. shieldCheck → "Privacy First" / "Your conversations and API keys never touch our servers"
+      4. code → "Fully Open Source" / "Inspect the code, contribute, or self-host"
+  p.privacy-verify  →  "Want to verify?..." with GitHub link
+  p.privacy-collect  →  "What data do we collect? Nothing."
+```
+
+### CSS changes (`app/app.css`)
+
+~65 lines of new styles:
+
+| Class | Key Styles |
+|-------|------------|
+| `.privacy-section` | `text-align: center`, `margin-top: 48px`, `padding: 40px 0` |
+| `.privacy-badge` | `inline-flex` pill, `border: 1px solid var(--accent)`, `border-radius: 20px`, accent text, 12px, 14px icon |
+| `.privacy-title` | 28px bold, `margin-top: 16px` |
+| `.privacy-subtitle` | 15px muted, `max-width: 520px`, `margin: auto` |
+| `.privacy-cards` | `grid`, `repeat(auto-fill, minmax(200px, 1fr))`, `gap: 16px`, `margin-top: 32px`, `text-align: left` |
+| `.privacy-card` | `border: 1px solid var(--border)`, `border-radius: 12px`, `padding: 24px` |
+| `.privacy-card-icon` | 40px rounded square, `var(--accent-soft)` background, accent icon color, 20px SVG |
+| `.privacy-card-title` | 15px semibold, `margin-top: 14px` |
+| `.privacy-card-desc` | 13px muted, `margin-top: 6px` |
+| `.privacy-verify` | 14px muted, `margin-top: 32px`, link with accent underline |
+| `.privacy-collect` | 13px dim, `margin-top: 12px` |
+
+---
+
+## Summarization Bug Fixes — DONE
+
+### Problem
+
+Multiple cascading issues with branch auto-summarization:
+
+1. **400 errors flooding the console** — OpenAI returned `400 Bad Request` on every summarize call
+2. **Infinite retry loop** — failed branches retried on every PROJECT screen navigation
+3. **Empty summaries from reasoning models** — `gpt-5-mini` used all `max_completion_tokens` for reasoning, returning `"content": ""`
+4. **Unnecessary re-summarization** — branches with existing summaries were re-requested
+
+### Root causes and fixes
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| 400 Bad Request | `summarizeBranch()` sent `temperature: 0.3` — rejected by `gpt-5-mini` (and o-series models) which only accept default (1) | Removed `temperature` from summarize options entirely |
+| Infinite retry | On failure, `summaryMsgCount` was never updated, so `lazySummarizeBranches` re-fired the same requests on every navigation | Added `_summaryFailed` Map that tracks `branchId → msgCount` at failure; skips branches that already failed at current message count; clears on success |
+| Empty summaries | `max_completion_tokens: 60` too small for reasoning models — `gpt-5-mini` used all 60 tokens for reasoning (`"reasoning_tokens": 60`), leaving 0 for output | Increased `max_tokens` to 600; hardcoded `gpt-4o-mini` for OpenAI summaries (no need for expensive/reasoning models) |
+| Redundant re-summarization | `lazySummarizeBranches` checked `summaryMsgCount !== messages.length`, re-triggering for any branch where messages changed since last summary | Changed condition to `if (b.summary) continue` — skips any branch that already has a summary; per-message summarize in `sendMessage()` handles updates |
+
+### Model override for summarization (`app/src/summarize.js`)
+
+Summarization now uses a **hardcoded small model per provider**, ignoring the user's selected model:
+
+```js
+const SUMMARY_MODEL = {
+  openai: 'gpt-4o-mini',
+  anthropic: 'claude-haiku-4-5-20251001',
+};
+```
+
+Falls back to user's model for other providers (e.g., Ollama). Uses standard `system` role (no reasoning model workarounds needed). `max_tokens: 600`.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `app/src/summarize.js` | Rewrote: removed reasoning model detection (`REASONING_RE`), removed `temperature`, added `SUMMARY_MODEL` map per provider, `max_tokens` 60→600, added `console.warn` on failure + rethrow |
+| `app/src/main.js` | `lazySummarizeBranches()`: replaced `_summarizing` Set with `_summaryFailed` Map; added `if (b.summary) continue` to skip existing summaries; added `.catch()` to sendMessage summarize path |
+
+---
+
+## Message Duplication Bug Fix — DONE
+
+### Problem
+
+After creating new branches, all existing branch messages were duplicated (some 3x, some 6x). The message counts in the UI were wildly inflated (e.g., 104 → 624, 136 → 816).
+
+### Root cause
+
+`putProjectWithChildren()` in `db.js` used `msgStore.add()` to write messages — which always creates NEW records (messages store uses `autoIncrement` keys). **It never deleted existing messages first.** Each call appended duplicates.
+
+This function is called from:
+- `newBranch()` → `persistProject()` → `putProjectWithChildren()`
+- `newProject()` → `persistProject()` → `putProjectWithChildren()`
+- `migration.js` (one-time)
+
+So every `newBranch()` call re-wrote ALL messages for ALL branches in the project as additional records, multiplying messages.
+
+### Fix (`app/src/db.js`)
+
+Added existing message deletion before writes in `putProjectWithChildren()`:
+
+```js
+// delete existing messages for this branch first to prevent duplicates
+const existingKeys = await req2p(msgStore.index('by_branch').getAllKeys(branch.id));
+for (const k of existingKeys) msgStore.delete(k);
+```
+
+This matches the pattern already used in `replaceMessages()`.
+
+### Data repair on load (`app/src/state.js`)
+
+Added deduplication in `reloadFromDB()` to clean up already-duplicated data:
+
+```js
+// Dedup: keep only the first message per seq value
+const seen = new Set();
+const uniqueMsgs = [];
+for (const m of rawMsgs) {
+  if (!seen.has(m.seq)) {
+    seen.add(m.seq);
+    uniqueMsgs.push(m);
+  }
+}
+// If duplicates were found, repair the IDB data
+if (uniqueMsgs.length < rawMsgs.length) {
+  await replaceMessages(b.id, cleaned);
+}
+```
+
+On load, if duplicates are detected, the branch's messages are repaired in-place via `replaceMessages()` (which deletes-then-adds). Console warns with before/after counts.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `app/src/db.js` | `putProjectWithChildren()`: added message deletion before adding new messages for each branch |
+| `app/src/state.js` | `reloadFromDB()`: added seq-based deduplication with IDB repair via `replaceMessages()` |
+
+---
+
+## Model Dropdown Regression Fix — DONE
+
+### Problem
+
+After summarization started succeeding (with `gpt-4o-mini`), users saw "No model selected. Please select a model from the dropdown." when sending messages — even though the model dropdown visibly showed a model.
+
+### Root cause
+
+`lazySummarizeBranches()` fires on the PROJECT screen. When a summary succeeds, it calls `renderAll()`. If the user navigated to the CHAT screen in the meantime, `renderAll()` → `renderHeader()` recreates the `<select id="modelSel">` with only `<option>loading...</option>`. But `renderAll()` never called `repopulateModelsFromCache()` to refill it.
+
+When the user then sent a message, `$('modelSel')?.value` was `"loading..."`, which matched the guard condition → alert.
+
+This was a **latent bug** exposed by summarization now succeeding. Previously, summarization always failed with `gpt-5-mini`, so `renderAll()` was never called from the summarize handler.
+
+### Fix
+
+Added `onChatRender` callback to the callback system:
+
+**`app/src/ui.js`** — `renderAll()` now calls `_callbacks.onChatRender?.()` after `renderChatScreen()` + `replayModelStatus()` when on the chat screen.
+
+**`app/src/main.js`** — Registered `onChatRender` callback in `setCallbacks()`:
+
+```js
+onChatRender: () => {
+  repopulateModelsFromCache();
+  populateProviders();
+},
+```
+
+This ensures provider/model dropdowns are always repopulated from cache whenever the chat screen's header is re-rendered — regardless of what triggered `renderAll()`.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `app/src/ui.js` | `renderAll()`: added `_callbacks.onChatRender?.()` call when on CHAT screen |
+| `app/src/main.js` | `setCallbacks()`: added `onChatRender` callback that calls `repopulateModelsFromCache()` + `populateProviders()` |
+
+---
+
 ## Resume Point
 
-**Phases 1–8B complete + Settings UX fixes done.** Next steps:
+**Phases 1–8B complete + Settings UX fixes + Privacy section + Summarization fixes + Message duplication fix done.** Next steps:
 - Live-test content script integration on ChatGPT (Phase 4 verification)
 - Polish: empty state illustrations, loading skeletons, keyboard shortcuts
 - Remove legacy `branch-host/` and `branch-chat-ext/` directories
