@@ -1,6 +1,6 @@
 // ui.js — screen-based rendering + event wiring (XSS-safe)
 import { state, currentProject, currentBranch, persist, newProject, newBranch, deleteBranch, deleteProject } from './state.js';
-import { escapeHtml, estimateTokens, getTokenLimit, now, timeAgo, pickDefaultEmoji } from './utils.js';
+import { escapeHtml, estimateTokens, getTokenLimit, now, timeAgo } from './utils.js';
 import { getProvider } from './providers/registry.js';
 import { SCREENS, navigateTo, getCurrentScreen } from './router.js';
 import { ICONS } from './icons.js';
@@ -69,7 +69,7 @@ function renderHeader() {
         <div class="breadcrumb">
           <a id="navHome">Projects</a>
           <span class="sep">${ICONS.chevronRight}</span>
-          <span class="current">${p ? escapeHtml(p.emoji) + ' ' + escapeHtml(p.name) : 'Project'}</span>
+          <span class="current">${p ? escapeHtml(p.name) : 'Project'}</span>
         </div>
       </div>
       <div class="header-right">
@@ -90,9 +90,9 @@ function renderHeader() {
         <div class="breadcrumb">
           <a id="navHome">Projects</a>
           <span class="sep">${ICONS.chevronRight}</span>
-          <a id="navProject">${p ? escapeHtml(p.emoji) + ' ' + escapeHtml(p.name) : 'Project'}</a>
+          <a id="navProject">${p ? escapeHtml(p.name) : 'Project'}</a>
           <span class="sep">${ICONS.chevronRight}</span>
-          <span class="current">${b ? escapeHtml(b.emoji) + ' ' + escapeHtml(b.title) : 'Branch'}</span>
+          <span class="current">${b ? escapeHtml(b.title) : 'Branch'}</span>
         </div>
       </div>
       <div class="header-right">
@@ -193,7 +193,7 @@ function renderProjectsScreen() {
       html += `
         <div class="project-card" data-project="${escapeHtml(p.id)}">
           <button class="card-delete" data-del-project="${escapeHtml(p.id)}" title="Delete project">&times;</button>
-          <div class="card-emoji">${escapeHtml(p.emoji || '')}</div>
+          ${p.emoji ? `<div class="card-emoji">${escapeHtml(p.emoji)}</div>` : ''}
           <div class="card-name">${escapeHtml(p.name)}</div>
           <div class="card-desc">${escapeHtml(p.description || '')}</div>
           <div class="card-meta">
@@ -215,7 +215,7 @@ function renderProjectsScreen() {
       const branchCount = (p.branches || []).length;
       html += `
       <div class="table-row" data-project="${escapeHtml(p.id)}">
-        <span class="col-name"><span class="row-emoji">${escapeHtml(p.emoji || '')}</span> ${escapeHtml(p.name)}</span>
+        <span class="col-name">${p.emoji ? `<span class="row-emoji">${escapeHtml(p.emoji)}</span> ` : ''}${escapeHtml(p.name)}</span>
         <span class="col-desc">${escapeHtml(p.description || '')}</span>
         <span class="col-count">${ICONS.gitBranch} ${branchCount}</span>
         <span class="col-updated">${ICONS.clock} ${timeAgo(p.updatedAt)}</span>
@@ -283,8 +283,7 @@ function renderProjectsScreen() {
   });
 }
 
-function renderBranchesScreen() {
-  const el = $('project-content');
+function renderBranchesInto(el) {
   if (!el) return;
 
   const p = currentProject();
@@ -314,7 +313,7 @@ function renderBranchesScreen() {
         <div class="branch-card" data-branch="${escapeHtml(b.id)}">
           ${isActive ? '<div class="active-dot"></div>' : ''}
           <button class="card-delete" data-del-branch="${escapeHtml(b.id)}" title="Delete branch">&times;</button>
-          <div class="card-emoji">${escapeHtml(b.emoji || '')}</div>
+          ${b.emoji ? `<div class="card-emoji">${escapeHtml(b.emoji)}</div>` : ''}
           <div class="card-name">${escapeHtml(b.title)}</div>
           <div class="card-desc">${escapeHtml(b.summary || b.description || '')}</div>
           <div class="card-meta">
@@ -346,7 +345,7 @@ function renderBranchesScreen() {
         : '';
       html += `
       <div class="table-row${isActive ? ' row-active' : ''}" data-branch="${escapeHtml(b.id)}">
-        <span class="col-name"><span class="row-emoji">${escapeHtml(b.emoji || '')}</span> ${escapeHtml(b.title)}</span>
+        <span class="col-name">${b.emoji ? `<span class="row-emoji">${escapeHtml(b.emoji)}</span> ` : ''}${escapeHtml(b.title)}</span>
         <span class="col-desc">${expandBtn}<span class="desc-text">${escapeHtml(summaryText)}</span></span>
         <span class="col-count">${ICONS.message} ${msgCount}</span>
         <span class="col-origin">${origin}</span>
@@ -390,64 +389,75 @@ function renderBranchesScreen() {
   });
 }
 
-function renderChatScreen() {
+function renderChatInto(container) {
+  if (!container) return;
+
   const b = currentBranch();
   const messages = Array.isArray(b?.messages) ? b.messages : [];
 
-  // Subtitle bar
-  const subtitleEl = $('chatSubtitle');
-  if (subtitleEl && b) {
+  // Build the chat container HTML
+  let subtitleText = '';
+  if (b) {
     const parts = [];
     if (b.branchedFromMsg != null) parts.push(`Branched from msg ${b.branchedFromMsg + 1}`);
     parts.push(`${messages.length} message${messages.length !== 1 ? 's' : ''}`);
-    subtitleEl.textContent = parts.join(' \u00B7 ');
+    subtitleText = parts.join(' \u00B7 ');
   }
 
-  // Messages
+  container.innerHTML = `
+    <div class="chat-container">
+      <div class="chat-subtitle" id="chatSubtitle">${escapeHtml(subtitleText)}</div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-bar">
+        <textarea id="chatInput" placeholder="Type to continue this branch..." rows="1"></textarea>
+        <button class="send-btn" id="sendBtn" title="Send message"></button>
+      </div>
+    </div>
+  `;
+
   const chatEl = $('chatMessages');
   if (!chatEl) return;
 
   if (!messages.length) {
     chatEl.innerHTML = '<div class="empty-state"><p>Start the conversation by typing a message below.</p></div>';
-    return;
+  } else {
+    chatEl.innerHTML = messages.map((m, idx) => {
+      const isUser = m.role === 'user';
+      const avatar = isUser ? 'You' : 'AI';
+      const copyBtn = !isUser ? `<button class="msg-action-btn" data-copy="${idx}" title="Copy">${ICONS.copy}</button>` : '';
+      return `
+        <div class="msg-row ${escapeHtml(m.role)}">
+          <div class="msg-avatar">${avatar}</div>
+          <div class="msg-bubble">${escapeHtml(m.content)}</div>
+          <div class="msg-actions">
+            <button class="msg-action-btn" data-branch-idx="${idx}" title="Branch from here">${ICONS.gitFork}</button>
+            ${copyBtn}
+          </div>
+        </div>`;
+    }).join('');
+
+    // Wire branch-here buttons
+    chatEl.querySelectorAll('[data-branch-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = Number(btn.dataset.branchIdx);
+        const seed = messages.slice(0, i + 1);
+        newBranch(`Branch @ msg ${i + 1}`, seed, i);
+        navigateTo(SCREENS.PROJECT);
+      });
+    });
+
+    // Wire copy buttons
+    chatEl.querySelectorAll('[data-copy]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const i = Number(btn.dataset.copy);
+        const text = messages[i]?.content || '';
+        if (text) await navigator.clipboard.writeText(text);
+      });
+    });
+
+    // Auto-scroll
+    chatEl.scrollTop = chatEl.scrollHeight;
   }
-
-  chatEl.innerHTML = messages.map((m, idx) => {
-    const isUser = m.role === 'user';
-    const avatar = isUser ? 'You' : 'AI';
-    const copyBtn = !isUser ? `<button class="msg-action-btn" data-copy="${idx}" title="Copy">${ICONS.copy}</button>` : '';
-    return `
-      <div class="msg-row ${escapeHtml(m.role)}">
-        <div class="msg-avatar">${avatar}</div>
-        <div class="msg-bubble">${escapeHtml(m.content)}</div>
-        <div class="msg-actions">
-          <button class="msg-action-btn" data-branch-idx="${idx}" title="Branch from here">${ICONS.gitFork}</button>
-          ${copyBtn}
-        </div>
-      </div>`;
-  }).join('');
-
-  // Wire branch-here buttons
-  chatEl.querySelectorAll('[data-branch-idx]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const i = Number(btn.dataset.branchIdx);
-      const seed = messages.slice(0, i + 1);
-      newBranch(`Branch @ msg ${i + 1}`, seed, i);
-      navigateTo(SCREENS.PROJECT);
-    });
-  });
-
-  // Wire copy buttons
-  chatEl.querySelectorAll('[data-copy]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const i = Number(btn.dataset.copy);
-      const text = messages[i]?.content || '';
-      if (text) await navigator.clipboard.writeText(text);
-    });
-  });
-
-  // Auto-scroll
-  chatEl.scrollTop = chatEl.scrollHeight;
 
   // Update token info
   updateTokenInfo();
@@ -503,9 +513,95 @@ function updateTokenInfo() {
 // --- screen activation ---
 
 function activateScreen(screen) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  const target = document.getElementById(`screen-${screen}`);
-  if (target) target.classList.add('active');
+  const homeEl = $('screen-home');
+  const workspace = $('workspace');
+
+  if (screen === SCREENS.HOME) {
+    if (homeEl) homeEl.classList.add('active');
+    if (homeEl) homeEl.style.display = '';
+    if (workspace) workspace.style.display = 'none';
+  } else {
+    if (homeEl) homeEl.classList.remove('active');
+    if (homeEl) homeEl.style.display = 'none';
+    if (workspace) workspace.style.display = 'flex';
+  }
+}
+
+// --- sidebar rendering ---
+
+function renderSidebar() {
+  const sidebarEl = $('sidebar');
+  const sidebarContent = $('sidebar-content');
+  if (!sidebarEl || !sidebarContent) return;
+
+  sidebarEl.classList.remove('collapsed');
+  const projects = Array.isArray(state.projects) ? state.projects : [];
+  const screen = getCurrentScreen();
+
+  let html = '<div class="sidebar-back-btn" id="sidebarBackHome">' + ICONS.chevronLeft + ' Projects</div>';
+  for (const p of projects) {
+    const isActive = p.id === state.activeProjectId;
+    const branchCount = (p.branches || []).length;
+    const isExpanded = isActive && state._sidebarExpanded !== false;
+    html += `
+      <div class="sidebar-project-group${isActive ? ' active' : ''}">
+        <div class="sidebar-item" data-sidebar-project="${escapeHtml(p.id)}">
+          <span class="sidebar-item-chevron${isExpanded ? ' expanded' : ''}">${ICONS.chevronRight}</span>
+          <div class="sidebar-item-body">
+            <div class="sidebar-item-name">${escapeHtml(p.name)}</div>
+            <div class="sidebar-item-meta">${branchCount} branch${branchCount !== 1 ? 'es' : ''}</div>
+          </div>
+        </div>
+        <div class="sidebar-branches${isExpanded ? ' open' : ''}">`;
+    if (isExpanded) {
+      for (const b of (p.branches || [])) {
+        const isBranchActive = b.id === state.activeBranchId;
+        const msgCount = (b.messages || []).length;
+        html += `
+          <div class="sidebar-branch${isBranchActive ? ' active' : ''}" data-sidebar-branch="${escapeHtml(b.id)}" data-sidebar-branch-project="${escapeHtml(p.id)}">
+            <div class="sidebar-branch-name">${escapeHtml(b.title)}</div>
+            <div class="sidebar-branch-meta">${msgCount} msg${msgCount !== 1 ? 's' : ''}</div>
+          </div>`;
+      }
+    }
+    html += `</div></div>`;
+  }
+  sidebarContent.innerHTML = html;
+
+  // Wire back button
+  const backBtn = $('sidebarBackHome');
+  if (backBtn) backBtn.onclick = () => navigateTo(SCREENS.HOME);
+
+  // Wire project clicks — expand/collapse + set active
+  sidebarContent.querySelectorAll('[data-sidebar-project]').forEach(node => {
+    node.addEventListener('click', () => {
+      const pid = node.dataset.sidebarProject;
+      if (state.activeProjectId === pid) {
+        // Toggle expand/collapse
+        state._sidebarExpanded = !state._sidebarExpanded;
+      } else {
+        state.activeProjectId = pid;
+        state._sidebarExpanded = true;
+        const proj = state.projects.find(x => x.id === pid);
+        if (proj?.branches?.[0]) state.activeBranchId = proj.branches[0].id;
+      }
+      persist();
+      renderAll();
+    });
+  });
+
+  // Wire branch clicks — navigate to chat
+  sidebarContent.querySelectorAll('[data-sidebar-branch]').forEach(node => {
+    node.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const bid = node.dataset.sidebarBranch;
+      const pid = node.dataset.sidebarBranchProject;
+      state.activeProjectId = pid;
+      state.activeBranchId = bid;
+      persist();
+      navigateTo(SCREENS.CHAT);
+    });
+  });
 }
 
 // --- main render ---
@@ -518,9 +614,21 @@ export function renderAll() {
   if (screen === SCREENS.HOME) {
     renderProjectsScreen();
   } else if (screen === SCREENS.PROJECT) {
-    renderBranchesScreen();
+    state.sidebarCollapsed = false;
+    renderSidebar();
+    const workspaceContent = $('workspace-content');
+    if (workspaceContent) {
+      workspaceContent.className = '';
+      renderBranchesInto(workspaceContent);
+    }
   } else if (screen === SCREENS.CHAT) {
-    renderChatScreen();
+    state.sidebarCollapsed = true;
+    renderSidebar();
+    const workspaceContent = $('workspace-content');
+    if (workspaceContent) {
+      workspaceContent.className = 'chat-mode';
+      renderChatInto(workspaceContent);
+    }
     replayModelStatus();
     _callbacks.onChatRender?.();
   }
@@ -553,6 +661,7 @@ export function openSettingsModal() {
         <label>OpenAI API Key</label>
         <div class="setting-row">
           <input type="password" id="settOpenaiKey" value="${escapeHtml(state.settings.openai.apiKey)}" placeholder="sk-..." />
+          <button class="btn-sm btn-save-key" id="saveOpenaiKey">Save</button>
           <button class="btn-sm" id="testOpenai">Test</button>
           ${state.settings.openai.apiKey ? '<button class="btn-delete-key" id="deleteOpenaiKey" title="Remove API key">Delete</button>' : ''}
           <span class="test-result" id="testOpenaiResult"></span>
@@ -561,6 +670,7 @@ export function openSettingsModal() {
         <label>Anthropic API Key</label>
         <div class="setting-row">
           <input type="password" id="settAnthropicKey" value="${escapeHtml(state.settings.anthropic.apiKey)}" placeholder="sk-ant-..." />
+          <button class="btn-sm btn-save-key" id="saveAnthropicKey">Save</button>
           <button class="btn-sm" id="testAnthropic">Test</button>
           ${state.settings.anthropic.apiKey ? '<button class="btn-delete-key" id="deleteAnthropicKey" title="Remove API key">Delete</button>' : ''}
           <span class="test-result" id="testAnthropicResult"></span>
@@ -660,6 +770,14 @@ export function openSettingsModal() {
   $('testOllama').onclick = () => _testProvider('ollama', { url: $('settOllamaUrl').value.trim() }, $('testOllamaResult'));
   $('testOpenai').onclick = () => _testProvider('openai', { apiKey: $('settOpenaiKey').value.trim() }, $('testOpenaiResult'));
   $('testAnthropic').onclick = () => _testProvider('anthropic', { apiKey: $('settAnthropicKey').value.trim() }, $('testAnthropicResult'));
+
+  // Save individual API key buttons
+  $('saveOpenaiKey').onclick = () => {
+    _callbacks.onSaveApiKey?.('openai', { apiKey: $('settOpenaiKey').value.trim() });
+  };
+  $('saveAnthropicKey').onclick = () => {
+    _callbacks.onSaveApiKey?.('anthropic', { apiKey: $('settAnthropicKey').value.trim() });
+  };
 
   // Delete API key buttons
   const deleteOpenaiBtn = $('deleteOpenaiKey');
@@ -790,8 +908,6 @@ export function getSettingsValues() {
 
 // --- new project/branch modals ---
 
-const EMOJI_OPTIONS = ['\uD83D\uDE80', '\uD83D\uDCA1', '\uD83C\uDFA8', '\u26A1', '\uD83D\uDCCA', '\uD83D\uDD27', '\uD83C\uDF1F', '\uD83D\uDCDD'];
-
 function openNewProjectModal(onSave) {
   _openCreateModal('New Project', 'Project name', onSave);
 }
@@ -803,9 +919,6 @@ function openNewBranchModal(onSave) {
 function _openCreateModal(title, namePlaceholder, onSave) {
   const existing = $('createModal');
   if (existing) existing.remove();
-
-  const defaultEmoji = pickDefaultEmoji();
-  let selectedEmoji = defaultEmoji;
 
   const modal = document.createElement('div');
   modal.id = 'createModal';
@@ -820,10 +933,6 @@ function _openCreateModal(title, namePlaceholder, onSave) {
         <div class="create-form">
           <input type="text" id="createName" placeholder="${escapeHtml(namePlaceholder)}" autofocus />
           <textarea id="createDesc" placeholder="Description (optional)" rows="2"></textarea>
-          <label>Icon</label>
-          <div class="emoji-grid" id="emojiGrid">
-            ${EMOJI_OPTIONS.map(e => `<div class="emoji-option ${e === defaultEmoji ? 'selected' : ''}" data-emoji="${e}">${e}</div>`).join('')}
-          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -837,19 +946,11 @@ function _openCreateModal(title, namePlaceholder, onSave) {
   modal.querySelector('.modal-close').onclick = () => modal.remove();
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 
-  modal.querySelectorAll('.emoji-option').forEach(opt => {
-    opt.addEventListener('click', () => {
-      modal.querySelectorAll('.emoji-option').forEach(o => o.classList.remove('selected'));
-      opt.classList.add('selected');
-      selectedEmoji = opt.dataset.emoji;
-    });
-  });
-
   $('createSaveBtn').onclick = () => {
     const name = $('createName').value.trim() || 'Untitled';
     const desc = $('createDesc').value.trim();
     modal.remove();
-    onSave(name, desc, selectedEmoji);
+    onSave(name, desc, '');
   };
 
   $('createName').addEventListener('keydown', (e) => {

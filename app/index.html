@@ -15,22 +15,14 @@
     </div>
   </main>
 
-  <main id="screen-project" class="screen">
-    <div class="screen-inner">
-      <div id="project-content"></div>
+  <div id="workspace" class="workspace" style="display:none;">
+    <aside id="sidebar" class="sidebar">
+      <div id="sidebar-content"></div>
+    </aside>
+    <div id="workspace-main">
+      <div id="workspace-content"></div>
     </div>
-  </main>
-
-  <main id="screen-chat" class="screen">
-    <div class="chat-container">
-      <div class="chat-subtitle" id="chatSubtitle"></div>
-      <div class="chat-messages" id="chatMessages"></div>
-      <div class="chat-input-bar">
-        <textarea id="chatInput" placeholder="Type to continue this branch..." rows="1"></textarea>
-        <button class="send-btn" id="sendBtn" title="Send message"></button>
-      </div>
-    </div>
-  </main>
+  </div>
 
   <input type="file" id="fileInput" style="display:none" accept=".json,.branchai.json" />
 
