@@ -1,6 +1,6 @@
 // state.js — IndexedDB + chrome.storage.local backed state with provider settings
 
-import { genId, now, pickDefaultEmoji } from './utils.js';
+import { genId, now } from './utils.js';
 import { encrypt, decrypt, isEncrypted } from './crypto.js';
 import {
   getAllProjects, getBranchesForProject, getMessagesForBranch,
@@ -14,6 +14,8 @@ export const state = {
   activeProjectId: null,
   activeBranchId: null,
   viewMode: 'list',
+  sidebarCollapsed: false,
+  _sidebarExpanded: true,
   settings: {
     activeProvider: 'openai',
     defaultModel: null,
@@ -44,11 +46,11 @@ function normalizeState() {
   for (const p of state.projects) {
     if (!Array.isArray(p.branches)) p.branches = [];
     if (!p.description) p.description = '';
-    if (!p.emoji) p.emoji = pickDefaultEmoji();
+    if (!p.emoji) p.emoji = '';
     if (!p.updatedAt) p.updatedAt = p.createdAt || now();
     for (const b of p.branches) {
       if (!b.description) b.description = '';
-      if (!b.emoji) b.emoji = pickDefaultEmoji();
+      if (!b.emoji) b.emoji = '';
       if (!b.updatedAt) b.updatedAt = b.createdAt || now();
       if (b.branchedFromMsg === undefined) b.branchedFromMsg = null;
       if (!b.summary) b.summary = '';
@@ -221,7 +223,7 @@ export function newProject(name = 'New Project', seedMessages = null, firstBranc
     id: pid,
     name,
     description,
-    emoji: emoji || pickDefaultEmoji(),
+    emoji: emoji || '',
     createdAt: ts,
     updatedAt: ts,
     branches: [],
@@ -233,7 +235,7 @@ export function newProject(name = 'New Project', seedMessages = null, firstBranc
       id: bid,
       title: firstBranchTitle,
       description: '',
-      emoji: pickDefaultEmoji(),
+      emoji: '',
       createdAt: ts,
       updatedAt: ts,
       branchedFromMsg: null,
@@ -258,7 +260,7 @@ export function newBranch(title = 'New Branch', seedMessages = [], branchedFromM
     id: genId('br'),
     title,
     description,
-    emoji: emoji || pickDefaultEmoji(),
+    emoji: emoji || '',
     createdAt: ts,
     updatedAt: ts,
     branchedFromMsg,
