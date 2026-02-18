@@ -1,6 +1,6 @@
 // export_import.js — project export/import
 import { state, currentProject, persistProject, persistSettings } from './state.js';
-import { genId, pickDefaultEmoji, now } from './utils.js';
+import { genId, now } from './utils.js';
 
 export function exportCurrentProject() {
   const p = currentProject();
@@ -61,14 +61,14 @@ export async function importFromFile(file) {
     id: pid,
     name: data.name,
     description: data.description || '',
-    emoji: data.emoji || pickDefaultEmoji(),
+    emoji: data.emoji || '',
     createdAt: data.createdAt || ts,
     updatedAt: data.updatedAt || ts,
     branches: data.branches.map(b => ({
       id: genId('br'),
       title: b.title || 'Imported Branch',
       description: b.description || '',
-      emoji: b.emoji || pickDefaultEmoji(),
+      emoji: b.emoji || '',
       createdAt: b.createdAt || ts,
       updatedAt: b.updatedAt || ts,
       branchedFromMsg: b.branchedFromMsg ?? null,

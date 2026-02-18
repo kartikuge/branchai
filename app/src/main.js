@@ -390,6 +390,12 @@ setCallbacks({
     repopulateModelsFromCache();
     populateProviders();
   },
+  onSaveApiKey: (provider, config) => {
+    if (state.settings[provider]) {
+      Object.assign(state.settings[provider], config);
+      persistSettings();
+    }
+  },
   onSettingsSave: handleSettingsSave,
   onDarkModeChange: async (isDark) => {
     state.settings.darkMode = isDark;
@@ -432,6 +438,13 @@ if (fileInput) {
 // --- screen change listener ---
 
 onScreenChange(async (screen) => {
+  // Set sidebar collapse state based on screen
+  if (screen === SCREENS.PROJECT) {
+    state.sidebarCollapsed = false;
+  } else if (screen === SCREENS.CHAT) {
+    state.sidebarCollapsed = true;
+  }
+
   renderAll();
   if (screen === SCREENS.CHAT) {
     // Re-populate provider/model selects on chat entry

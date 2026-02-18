@@ -25,14 +25,6 @@ export function getTokenLimit(modelId) {
   return DEFAULT_TOKEN_LIMIT;
 }
 
-const DEFAULT_EMOJIS = ['\uD83D\uDE80', '\uD83D\uDCA1', '\uD83C\uDFA8', '\u26A1', '\uD83D\uDCCA', '\uD83D\uDD27', '\uD83C\uDF1F', '\uD83D\uDCDD'];
-let _emojiIdx = 0;
-export function pickDefaultEmoji() {
-  const emoji = DEFAULT_EMOJIS[_emojiIdx % DEFAULT_EMOJIS.length];
-  _emojiIdx++;
-  return emoji;
-}
-
 export function timeAgo(ts) {
   if (!ts) return '';
   const diff = Date.now() - ts;
