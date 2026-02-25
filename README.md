@@ -79,3 +79,5 @@ No build required. Edit files and reload the extension. For development outside 
 ## Status
 
 Active development on the `v2_refactor` branch. See [V2_PLAN.md](./V2_PLAN.md) for detailed phase history and architecture decisions.
+
+Will be available in the Chrome Extension Store soon.
